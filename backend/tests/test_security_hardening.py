@@ -1,4 +1,6 @@
 """Session revocation, database-backed login limiting, and the tamper-evident audit chain."""
+import uuid
+
 import pytest
 from sqlalchemy import select, text
 
@@ -200,3 +202,69 @@ def test_failed_login_on_fresh_database_without_organisation_returns_401(tmp_pat
         assert s.scalar(select(func.count()).select_from(AuthFailure)) == 1  # limiter still counts the failure
         assert s.scalar(select(func.count()).select_from(AuditEvent)) == 0  # no organisation to attribute it to
     eng.dispose()
+
+
+# ------------------------------------------------------------------ failed-login auditing (unknown vs real account)
+def _audit_state(db):
+    from sqlalchemy import func, select
+
+    from app.models import AuditEvent
+
+    db.expire_all()
+    per_org = dict(db.execute(select(AuditEvent.org_id, func.count()).group_by(AuditEvent.org_id)).all())
+    return per_org, db.scalar(select(func.max(AuditEvent.id)))
+
+
+def test_unknown_email_login_failures_are_not_audited_in_any_organisation(client, db):
+    """Regression: unknown emails used to be written to the first organisation's audit log (unauthenticated flooding)."""
+    from sqlalchemy import func, select
+
+    from app.models import AuthFailure
+
+    before = _audit_state(db)
+    emails = [f"nobody-{i}-{uuid.uuid4().hex[:8]}@nowhere.test" for i in range(5)]  # distinct limiter keys: none is rate limited
+    for email in emails:
+        r = client.post(f"{V1}/auth/login", json={"email": email, "password": "x" * 12})
+        assert r.status_code == 401 and r.json()["error"]["code"] == "invalid_credentials"
+    assert _audit_state(db) == before  # no row for any organisation, chain head unchanged
+    # the limiter still records each failure. Count the exact keys (TestClient's client host is "testclient"): the limiter
+    # prunes expired rows of other keys on every failure, so a table-wide count would be time dependent.
+    keys = [key_for("testclient", e) for e in emails]
+    assert db.scalar(select(func.count()).select_from(AuthFailure).where(AuthFailure.key_hash.in_(keys))) == 5
+    assert client.get(f"{V1}/audit/verify", headers=_login(client, "admin@aptiguard.demo")).json()["ok"]
+
+
+def test_failed_login_for_a_real_account_is_still_audited_in_its_own_organisation(client, db):
+    from sqlalchemy import select
+
+    from app.models import AuditEvent, User
+
+    org = db.scalar(select(User.org_id).where(User.email == "analyst@aptiguard.demo"))
+    before = _audit_state(db)[0].get(org, 0)
+    r = client.post(f"{V1}/auth/login", json={"email": "analyst@aptiguard.demo", "password": "definitely-wrong"})
+    assert r.status_code == 401 and r.json()["error"]["code"] == "invalid_credentials"
+    per_org, _ = _audit_state(db)
+    assert per_org.get(org, 0) == before + 1
+    ev = db.scalars(select(AuditEvent).where(AuditEvent.action == "auth.login_failed").order_by(AuditEvent.id.desc())).first()
+    assert ev.org_id == org and ev.details == {"email_domain": "aptiguard.demo", "reason": "invalid_credentials"}
+    assert "definitely-wrong" not in str(ev.details) + ev.summary
+    # a successful login clears the limiter for this account so later tests are unaffected
+    assert client.post(f"{V1}/auth/login", json={"email": "analyst@aptiguard.demo", "password": "AptiGuard-Demo-2026"}).status_code == 200
+
+
+def test_inactive_account_failure_is_audited_with_its_reason(client, db):
+    from sqlalchemy import select
+
+    from app.models import AuditEvent, User
+
+    u = db.scalar(select(User).where(User.email == "candidate2@aptiguard.demo"))
+    u.is_active = False
+    db.commit()
+    try:
+        r = client.post(f"{V1}/auth/login", json={"email": "candidate2@aptiguard.demo", "password": "AptiGuard-Demo-2026"})
+        assert r.status_code == 401 and r.json()["error"]["message"] == "Invalid email or password"  # still generic
+        ev = db.scalars(select(AuditEvent).where(AuditEvent.action == "auth.login_failed").order_by(AuditEvent.id.desc())).first()
+        assert ev.org_id == u.org_id and ev.details["reason"] == "inactive"
+    finally:
+        u.is_active = True
+        db.commit()
