@@ -21,6 +21,18 @@ def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float | None, float | No
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
+def newcombe_diff_ci(k1: int, n1: int, k2: int, n2: int, z: float = 1.6449) -> tuple[float, float] | None:
+    """Newcombe (1998) hybrid score interval for p1 - p2 (method 10), built from Wilson intervals.
+    Well-behaved at p = 0 or 1, unlike the Wald interval."""
+    if n1 <= 0 or n2 <= 0:
+        return None
+    p1, p2 = k1 / n1, k2 / n2
+    l1, u1 = wilson_ci(k1, n1, z)
+    l2, u2 = wilson_ci(k2, n2, z)
+    d = p1 - p2
+    return d - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2), d + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
+
+
 def item_statistics(df: pd.DataFrame) -> pd.DataFrame:
     """Per-item n, p-value with Wilson CI, missing rate, corrected item–rest correlation, median RT."""
     if df.empty:

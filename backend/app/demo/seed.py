@@ -42,11 +42,10 @@ from app.services.leakage.importer import import_dataset
 from app.services.leakage.service import run_detection
 from app.services.questions import SECTION_PREFIX, add_revision, create_from_item, persist_checks
 from app.services.textsim import char_cosine_matrix, item_fulltext, normalize
-from app.services.validation.validator import _core, answer_checks, overall, structural_checks
+from app.services.validation.validator import NEAR_DUP_FAIL, _core, answer_checks, overall, structural_checks
 from app.services.generation.base import Check
 
 SEED = 107
-DEMO_PASSWORD = "AptiGuard-Demo-2026"  # local demo accounts only — documented in README
 OUT_DIR = PROJECT_DIR / "data" / "synthetic"
 HIST_DRIVE = "Campus Drive 2026-Q3 (synthetic)"
 NEXT_DRIVE = "Campus Drive 2026-Q4"
@@ -83,6 +82,22 @@ L2_REACH = {6: 0.35, 7: 0.40, 8: 0.45, 9: 0.45, 10: 0.45}
 L3_POSTED = datetime(2026, 9, 17, 12, 30)  # after slot 8; its items never reappear → text-only evidence
 
 
+DEMO_ORG_SLUG = "integraminds-demo"
+
+
+def assert_disposable_demo_database(db: Session) -> None:
+    """Second, data-based safety net: only an empty database or one that holds nothing but the demo tenant may be
+    wiped. A database containing any other organisation is treated as real and is never reset."""
+    from sqlalchemy import inspect, text
+
+    if "organizations" not in inspect(db.get_bind()).get_table_names():
+        return
+    slugs = [r[0] for r in db.execute(text("SELECT slug FROM organizations")).all()]
+    foreign = [s for s in slugs if s != DEMO_ORG_SLUG]
+    if foreign:
+        raise RuntimeError(f"Refusing to wipe: database contains non-demo organisation(s) {foreign[:3]}")
+
+
 def reset_database(db: Session) -> None:
     """Delete all rows (schema/migrations untouched). Breaks the two intentional FK cycles first."""
     from sqlalchemy import text
@@ -105,7 +120,7 @@ def _slot_start(seq: int) -> datetime:
 
 
 def seed_identity(db: Session) -> dict:
-    org = Organization(name="Integraminds (demo tenant)", slug="integraminds-demo")
+    org = Organization(name="Integraminds (demo tenant)", slug=DEMO_ORG_SLUG)
     db.add(org)
     db.flush()
     perms = {code: Permission(code=code, description=d) for code, d in PERMISSIONS.items()}
@@ -117,7 +132,9 @@ def seed_identity(db: Session) -> dict:
         db.add(r)
         roles[name] = r
     db.flush()
-    pw = hash_password(DEMO_PASSWORD)
+    from app.core.config import get_settings
+
+    pw = hash_password(get_settings().demo_password)
     users = {}
     for email, name, role in USERS:
         u = User(org_id=org.id, email=email, full_name=name, password_hash=pw, role_id=roles[role].id)
@@ -140,33 +157,54 @@ def seed_bank(db: Session, org: Organization, users: dict, rng: random.Random) -
     approved_base = datetime(2026, 8, 3, 6, 0)
     k_item = 0
 
+    accepted_text: dict[str, list[str]] = {}
+
     def fresh(tid: str, band: str):
-        for _ in range(600):
+        """Same duplicate gate as the variant engine: no answer-equivalent clone, no near-duplicate text
+        (char-n-gram cosine >= NEAR_DUP_FAIL against any item already accepted for this template)."""
+        pool = accepted_text.setdefault(tid, [])
+        for _ in range(400):
             s = rng.randrange(1, 2**31)
             item = generate(tid, band, s)
             key = tid + json.dumps(_core(item.params), sort_keys=True, default=str)
-            if key not in seen_params:
+            if key in seen_params:
+                continue
+            text = normalize(item_fulltext(item.stem, [o["text"] for o in item.options]))
+            if pool and float(char_cosine_matrix([text], pool)[0].max()) >= NEAR_DUP_FAIL - 0.03:  # margin: IDF differs by corpus
                 seen_params.add(key)
-                item.params = {**item.params, "_seed": s}
-                return item
-        raise RuntimeError(f"could not create a fresh {tid}/{band} item")
+                continue
+            seen_params.add(key)
+            pool.append(text)
+            item.params = {**item.params, "_seed": s}
+            return item
+        return None  # this template's text space is exhausted: the family gets fewer variants (never a duplicate)
 
     for tid, tpl in TEMPLATES.items():
         prefix = SECTION_PREFIX[tpl.section]
         short = tid.split("-")[1]
-        for band in ("easy", "medium", "hard"):
+        sec = db.scalar(select(Section).where(Section.code == tpl.section))
+        fams = {}
+        for band in ("easy", "medium", "hard"):  # create every family of the template first ...
             for k in range(1, 4):
-                fam_code = f"FAM-{prefix}-{short}-{band[0].upper()}{k}"
-                sec = db.scalar(select(Section).where(Section.code == tpl.section))
-                fam = VariantFamily(code=fam_code, org_id=org.id, section_id=sec.id, concept=tpl.concept, skill=tpl.skill,
-                                    template_id=tid)
+                fam = VariantFamily(code=f"FAM-{prefix}-{short}-{band[0].upper()}{k}", org_id=org.id, section_id=sec.id,
+                                    concept=tpl.concept, skill=tpl.skill, template_id=tid)
                 db.add(fam)
                 db.flush()
-                members = []
-                for v in range(4):
+                fams[(band, k)] = {"family": fam, "members": []}
+        # ... then sources for all bands, then distinct variants round-robin (narrow templates: smaller families)
+        for v in range(4):
+            for band in ("easy", "medium", "hard"):
+                for k in range(1, 4):
+                    members = fams[(band, k)]["members"]
+                    if len(members) < v:
+                        continue
                     item = fresh(tid, band)
+                    if item is None:
+                        if v == 0:
+                            raise RuntimeError(f"no distinct source item available for {tid}/{band}")
+                        continue
                     code = f"{prefix}-{short}-{band[0].upper()}{k}-" + ("S" if v == 0 else f"V{v:02d}")
-                    q = create_from_item(db, item, org_id=org.id, family=fam, code=code,
+                    q = create_from_item(db, item, org_id=org.id, family=fams[(band, k)]["family"], code=code,
                                          parent=members[0] if v else None, method="template", status="approved",
                                          user=designer, is_source=(v == 0))
                     k_item += 1
@@ -181,23 +219,32 @@ def seed_bank(db: Session, org: Organization, users: dict, rng: random.Random) -
                                           comment="Verified key and distractors (synthetic demo approval)",
                                           question_version=1))
                     members.append(q)
-                fam.source_question_id = members[0].id
-                families[(tid, band, k)] = {"family": fam, "members": members}
+        for (band, k), f in fams.items():
+            f["family"].source_question_id = f["members"][0].id
+            families[(tid, band, k)] = f
     db.flush()
 
-    # batch near-duplicate screen over the approved bank (single TF-IDF fit)
-    allq = [m for f in families.values() for m in f["members"]]
-    texts = [normalize(item_fulltext(q.stem, [o.text for o in q.options])) for q in allq]
-    sims = char_cosine_matrix(texts, texts)
-    np.fill_diagonal(sims, 0)
-    for i, q in enumerate(allq):
-        j = int(sims[i].argmax())
-        st = "fail" if sims[i, j] >= 0.93 else ("warn" if sims[i, j] >= 0.86 else "pass")
-        from app.models import ValidationResult
-        db.add(ValidationResult(question_id=q.id, check="duplicate_near", status=st,
-                                severity="critical" if st == "fail" else ("warning" if st == "warn" else "info"),
-                                message=f"Nearest item {allq[j].code} at similarity {sims[i, j]:.2f} (batch screen)",
-                                details={"nearest": allq[j].code, "similarity": round(float(sims[i, j]), 3)}))
+    # independent near-duplicate screen per template (duplicates cannot cross templates: different concepts).
+    # The seed fails loudly rather than approving a duplicate.
+    from app.models import ValidationResult
+
+    by_tpl: dict[str, list] = {}
+    for f in families.values():
+        for m in f["members"]:
+            by_tpl.setdefault(m.template_id, []).append(m)
+    for tid, qs in by_tpl.items():
+        texts = [normalize(item_fulltext(q.stem, [o.text for o in q.options])) for q in qs]
+        sims = char_cosine_matrix(texts, texts)
+        np.fill_diagonal(sims, 0)
+        for i, q in enumerate(qs):
+            j = int(sims[i].argmax())
+            st = "fail" if sims[i, j] >= NEAR_DUP_FAIL else ("warn" if sims[i, j] >= 0.86 else "pass")
+            if st == "fail":
+                raise RuntimeError(f"seed integrity: {q.code} is a near-duplicate of {qs[j].code}")
+            db.add(ValidationResult(question_id=q.id, check="duplicate_near", status=st,
+                                    severity="warning" if st == "warn" else "info",
+                                    message=f"Nearest item {qs[j].code} at similarity {sims[i, j]:.2f} (template screen)",
+                                    details={"nearest": qs[j].code, "similarity": round(float(sims[i, j]), 3)}))
     return families
 
 
@@ -475,6 +522,11 @@ def write_outputs(df: pd.DataFrame, posts: list[dict], truth: dict, db: Session)
 
 
 def seed_demo(db: Session, with_next_drive: bool = True) -> dict:
+    from app.core.config import get_settings
+
+    if get_settings().is_production or not get_settings().demo_mode:
+        raise RuntimeError("Refusing to seed (and wipe) demo data: APP_ENV=production or DEMO_MODE=false")
+    assert_disposable_demo_database(db)
     rng = random.Random(SEED)
     reset_database(db)
     ident = seed_identity(db)
@@ -510,6 +562,19 @@ def seed_demo(db: Session, with_next_drive: bool = True) -> dict:
             "section_weights": {"QUANT": 1.0, "LOGICAL": 1.0, "VERBAL": 1.0}})
         if asm.status == "succeeded":
             publish_run(db, asm, users["admin"])
+            from app.models import CandidateAssignment, TestForm
+
+            forms = db.scalars(select(TestForm).where(TestForm.assembly_run_id == asm.id).order_by(TestForm.id)).all()
+            cands = {c.code: c for c in db.scalars(select(Candidate).where(Candidate.user_id.is_not(None))).all()}
+            plan = {"DEMO-CAND-01": [0, 1], "DEMO-CAND-02": [0, 1], "DEMO-CAND-03": [2]}  # form indexes (slots 1-3)
+            for code, idxs in plan.items():
+                for i in idxs:
+                    db.add(CandidateAssignment(candidate_id=cands[code].id, form_id=forms[i].id, assigned_by=users["admin"].id))
+        # The upcoming drive is scheduled in the future; demo mode lets assigned candidates start outside the slot
+        # window. This is an explicit, visible policy (Settings → Policies → assessment), not a hidden bypass.
+        from app.services.policies import set_policy
+
+        set_policy(db, org.id, "assessment", {"enforce_slot_window": False}, users["admin"].id)
         db.commit()
     audit.record(db, users["admin"], "demo.seeded", "system", "demo", f"Deterministic demo data seeded (seed {SEED})",
                  {"responses": report["responses_created"], "pending_reviews": len(pending)}, org_id=org.id)

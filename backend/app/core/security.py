@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import uuid
+
 import bcrypt
 import jwt
 
@@ -52,7 +54,7 @@ ROLES: dict[str, dict] = {
 
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
 def verify_password(password: str, hashed: str) -> bool:
@@ -64,10 +66,14 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user_id: int, role: str) -> tuple[str, datetime]:
     s = get_settings()
-    exp = datetime.now(timezone.utc) + timedelta(minutes=s.jwt_expire_minutes)
-    token = jwt.encode({"sub": str(user_id), "role": role, "exp": exp, "iss": "aptiguard"}, s.jwt_secret, "HS256")
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=s.jwt_expire_minutes)
+    claims = {"sub": str(user_id), "role": role, "iat": now, "nbf": now, "exp": exp, "iss": "aptiguard",
+              "jti": uuid.uuid4().hex}
+    token = jwt.encode(claims, s.jwt_secret, "HS256")
     return token, exp
 
 
 def decode_token(token: str) -> dict:
-    return jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"], issuer="aptiguard")
+    return jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"], issuer="aptiguard",
+                      options={"require": ["exp", "iat", "sub", "iss"]})

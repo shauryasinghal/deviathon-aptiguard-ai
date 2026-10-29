@@ -85,6 +85,14 @@ TERM_SETS = [
     ("cars", "buses", "trucks"), ("coins", "notes", "cards"), ("rivers", "lakes", "ponds"),
     ("poets", "singers", "dancers"), ("apples", "mangoes", "grapes"), ("laptops", "tablets", "phones"),
     ("teachers", "students", "parents"), ("chairs", "sofas", "beds"), ("kites", "birds", "planes"),
+    ("violins", "drums", "flutes"), ("clerks", "managers", "auditors"), ("lions", "tigers", "leopards"),
+    ("buckets", "mugs", "bottles"), ("rockets", "satellites", "probes"), ("bridges", "tunnels", "roads"),
+    ("novels", "magazines", "journals"), ("pilots", "sailors", "drivers"), ("gardens", "parks", "forests"),
+    ("rings", "chains", "bracelets"), ("towels", "curtains", "carpets"), ("lamps", "candles", "torches"),
+    ("hammers", "wrenches", "pliers"), ("islands", "deserts", "valleys"), ("judges", "lawyers", "clerks"),
+    ("shirts", "jackets", "sweaters"), ("emails", "letters", "parcels"), ("clocks", "watches", "timers"),
+    ("melons", "lemons", "cherries"), ("printers", "scanners", "monitors"), ("owls", "eagles", "parrots"),
+    ("coaches", "players", "referees"), ("vases", "bowls", "plates"), ("ferries", "yachts", "canoes"),
 ]
 REGIONS = [r for r in itertools.product([0, 1], repeat=3) if any(r)]  # membership in (S, M, P)
 

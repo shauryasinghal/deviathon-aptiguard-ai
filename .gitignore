@@ -38,3 +38,4 @@ frontend/playwright-report/
 .idea/
 .vscode/
 *.log
+frontend/blob-report/

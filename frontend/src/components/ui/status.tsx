@@ -13,19 +13,20 @@ const CALIBRATION: Record<string, Tone> = {
 };
 const RISK: Record<string, Tone> = { low: "ok", elevated: "warn", high: "danger" };
 const ALERT_STATUS: Record<string, Tone> = { open: "danger", acknowledged: "warn", investigating: "info", confirmed: "violet", dismissed: "neutral" };
+const FORM: Record<string, Tone> = { draft: "neutral", published: "ok", needs_review: "warn", historical: "neutral", locked: "neutral" };
 const EVIDENCE: Record<string, Tone> = { confirmed_text_match: "danger", statistical_suspicion: "warn", unverified_external: "info", human_confirmed: "violet" };
 
 const LABELS: Record<string, string> = {
   pending_review: "Pending review", within_tolerance: "Within tolerance", outside_tolerance: "Outside tolerance",
   requires_review: "Requires review", insufficient_data: "Insufficient data", pending_calibration: "Pending calibration",
   calibrated_reference: "Calibrated", confirmed_text_match: "Text match (dataset)", statistical_suspicion: "Statistical suspicion",
-  unverified_external: "Family / unverified", human_confirmed: "Human-confirmed",
+  unverified_external: "Family / unverified", human_confirmed: "Human-confirmed", needs_review: "Needs reassessment",
 };
 
-type Kind = "question" | "leak" | "severity" | "validation" | "calibration" | "risk" | "alert" | "evidence";
+type Kind = "question" | "leak" | "severity" | "validation" | "calibration" | "risk" | "alert" | "evidence" | "form";
 const MAPS: Record<Kind, Record<string, Tone>> = {
   question: QUESTION, leak: LEAK, severity: SEVERITY, validation: VALIDATION, calibration: CALIBRATION, risk: RISK,
-  alert: ALERT_STATUS, evidence: EVIDENCE,
+  alert: ALERT_STATUS, evidence: EVIDENCE, form: FORM,
 };
 
 export function StatusBadge({ kind, value, className }: { kind: Kind; value: string | null | undefined; className?: string }) {

@@ -18,6 +18,7 @@ from app.core.config import get_settings  # noqa: E402
 
 def main() -> None:
     url = get_settings().database_url
+    print(f"Seeding SYNTHETIC demo data into {url.split('@')[-1]} (existing demo data will be replaced)")
     if url.startswith("sqlite:///"):
         Path(url.replace("sqlite:///", "")).parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=BACKEND, check=True)

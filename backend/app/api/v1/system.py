@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
@@ -34,7 +35,7 @@ def ready(db: Session = Depends(get_db)):
     try:
         rev = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
     except Exception:  # noqa: BLE001 - migrations table missing means not ready
-        return {"status": "not_ready", "reason": "database not migrated"}
+        return JSONResponse(status_code=503, content={"status": "not_ready", "reason": "database not migrated"})
     n = db.scalar(select(func.count()).select_from(Question))
     return {"status": "ready", "db_latency_ms": round((time.perf_counter() - t0) * 1000, 2), "migration": rev,
             "questions": n}
@@ -51,12 +52,14 @@ def demo_status(db: Session = Depends(get_db)):
     s = get_settings()
     out = {"demo_mode": s.demo_mode, "seeded": bool(db.scalar(select(func.count()).select_from(Question))),
            "llm": {"provider": s.llm_provider, "configured": s.llm_configured}}
-    if s.demo_mode:
+    if s.demo_mode and not s.is_production:
+        # Synthetic demo accounts only (seeded by scripts/seed_demo.py). Exposed so the login page can offer
+        # one-click sign-in; authentication still verifies the bcrypt hash. Never available in production.
         out["demo_accounts"] = [
             {"email": e, "role": r} for e, r in [("admin@aptiguard.demo", "Administrator"), ("designer@aptiguard.demo", "Assessment Designer"),
                                                  ("reviewer@aptiguard.demo", "Reviewer"), ("analyst@aptiguard.demo", "Psychometric Analyst"),
                                                  ("candidate1@aptiguard.demo", "Candidate")]]
-        out["demo_password_hint"] = "See README → Demo accounts (local demo only)"
+        out["demo_password"] = s.demo_password
     return out
 
 
@@ -151,7 +154,10 @@ def search(q: str = Query(min_length=2, max_length=100), user: User = Depends(ge
                                                                                          LeakAlert.title.ilike(like))).limit(5)).all():
             out.append({"type": "alert", "id": a.id, "label": a.code, "detail": a.title, "status": a.status})
     if "assembly.read" in perms:
-        for f in db.scalars(select(TestForm).where(TestForm.code.ilike(like)).limit(5)).all():
+        from app.models import Slot
+
+        for f in db.scalars(select(TestForm).join(Slot, Slot.id == TestForm.slot_id)
+                            .where(Slot.org_id == user.org_id, TestForm.code.ilike(like)).limit(5)).all():
             out.append({"type": "form", "id": f.id, "label": f.code, "detail": f.slot.name, "status": f.status,
                         "run_id": f.assembly_run_id})
     return {"results": out}

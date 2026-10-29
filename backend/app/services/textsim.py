@@ -23,7 +23,8 @@ _NUM = re.compile(r"\d+(?:[.,]\d+)*")
 
 def normalize(text: str) -> str:
     t = unicodedata.normalize("NFKC", text or "").lower()
-    t = t.replace("rs.", "₹").replace("inr", "₹")
+    t = re.sub(r"\b(?:rs\.?|inr)\s*(?=\d)", "₹", t)  # Rs. 400 / INR 400 / rs400 -> ₹400
+    t = re.sub(r"₹\s+", "₹", t)
     t = _PUNCT.sub(" ", t)
     t = re.sub(r"(?<!\d)\.(?!\d)", " ", t)
     return _WS.sub(" ", t).strip()

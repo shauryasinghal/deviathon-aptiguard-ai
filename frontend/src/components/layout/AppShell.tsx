@@ -142,7 +142,7 @@ export function UserMenu() {
         <MenuLabel>{user.email}</MenuLabel>
         <MenuItem onSelect={() => nav(user.role === "candidate" ? "/assessment" : "/settings")}><UserRound />{user.role_label}</MenuItem>
         <MenuSeparator />
-        <MenuItem onSelect={() => { logout(); nav("/login"); }} danger><LogOut />Sign out</MenuItem>
+        <MenuItem onSelect={() => { nav("/login", { replace: true }); logout(); }} danger><LogOut />Sign out</MenuItem>
       </MenuContent>
     </Menu>
   );

@@ -34,7 +34,9 @@ export default function Exposure() {
     onSuccess: () => { toast.success("Exposure policy updated"); qc.invalidateQueries(); },
     onError: (e: ApiError) => toast.error(e.message),
   });
-  const timeline = (tl.data?.slots ?? []).map((s: any) => ({ ...s, label: `${s.drive.includes("Q3") ? "Q3" : "Q4"}·S${s.sequence}` }));
+  const drives: string[] = tl.data?.drives ?? [];
+  const timeline = (tl.data?.slots ?? []).filter((s: any) => s.items_exposed > 0)
+    .map((s: any) => ({ ...s, label: `D${drives.indexOf(s.drive) + 1}·S${s.sequence}` }));
   return (
     <div>
       <PageHeader eyebrow="Integrity" title="Exposure intelligence" description="How often each item has been seen, by how many candidates, and how risky it is to use again." />
@@ -45,7 +47,7 @@ export default function Exposure() {
       </div>
       <div className="mt-5 grid gap-5 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <CardHeader title="Exposure timeline" description="Items exposed per slot — new vs. reused (historical drive reused 12 core items in every slot)" />
+          <CardHeader title="Exposure timeline" description={`Items administered per slot — first exposure vs. reuse. ${drives.map((d, i) => `D${i + 1} = ${d}`).join("; ")}`} />
           <CardBody>
             {tl.isLoading ? <LoadingRows /> : <div className="h-[220px]"><ResponsiveContainer>
               <BarChart data={timeline} margin={{ left: -16, right: 8 }}>

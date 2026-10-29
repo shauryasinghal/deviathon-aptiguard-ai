@@ -1,0 +1,19 @@
+# Local demo stack (synthetic data). For production set APP_ENV=production, DEMO_MODE=false, DEMO_SEED=false,
+# a strong JWT_SECRET, explicit CORS_ORIGINS and preferably DATABASE_URL pointing at PostgreSQL.
+services:
+  backend:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      DEMO_SEED: ${DEMO_SEED:-true}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////srv/backend/var/aptiguard.db}
+    volumes: [ "aptiguard-data:/srv/backend/var" ]
+  frontend:
+    build: { context: ., dockerfile: frontend/Dockerfile }
+    ports: [ "8080:8080" ]
+    depends_on: { backend: { condition: service_healthy } }
+volumes:
+  aptiguard-data:

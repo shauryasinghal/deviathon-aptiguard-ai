@@ -221,6 +221,11 @@ def verify_plan(plan: list[list[set[int]]], pool: dict[int, PoolItem], cfg: Asse
                         v.append({"constraint": "difficulty_mix", "slot": si + 1, "detail": f"{sec}/{band}: {got_b} != {k}"})
             for i in f:
                 uses.setdefault(i, []).append(si)
+            for fj in forms[:fi]:  # forms in the same slot are concurrent: same overlap limit applies
+                st = overlap_stats(fj, f)
+                if st["shared"] > allowed:
+                    v.append({"constraint": "same_slot_overlap", "slot": si + 1,
+                              "detail": f"{st['smaller_form_pct']}% shared > {cfg.max_adjacent_overlap_pct}%"})
         if si > 0:
             for a in plan[si - 1]:
                 for b in forms:

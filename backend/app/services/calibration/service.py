@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Attempt, CalibrationRun, ItemCalibration, Question, Response, Slot, User
 from app.services import audit
-from app.services.calibration.ctt import item_statistics, person_scores
+from app.services.calibration.ctt import item_statistics, newcombe_diff_ci, person_scores
 from app.services.calibration.rasch import RaschNotIdentified, fit_rasch
 from app.services.policies import get_policy
 
@@ -132,8 +132,8 @@ def run_calibration(db: Session, org_id: int, user: User | None, overrides: dict
                     lo, hi, basis, margin = diff - Z90 * dse, diff + Z90 * dse, "rasch_logit", tol
                 elif rs.n_valid >= pol["min_responses"]:
                     diff = (s.p or 0) - (rs.p or 0)
-                    dse = math.sqrt((s.p * (1 - s.p)) / s.n_valid + (rs.p * (1 - rs.p)) / rs.n_valid)
-                    lo, hi, basis, margin = diff - Z90 * dse, diff + Z90 * dse, "ctt_p_preliminary", tol_p
+                    lo, hi = newcombe_diff_ci(int(s.n_correct), int(s.n_valid), int(rs.n_correct), int(rs.n_valid), Z90)
+                    basis, margin = "ctt_p_preliminary", tol_p
                     w.append("Preliminary: raw p-value difference is confounded by differences in group ability.")
                 if basis:
                     status = equivalence_decision(lo, hi, margin)

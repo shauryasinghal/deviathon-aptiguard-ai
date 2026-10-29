@@ -4,16 +4,17 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.v1.serializers import user_label
 from app.core.deps import require
 from app.core.errors import Conflict, NotFound
 from app.db.session import get_db
-from app.models import AssemblyRun, Question, TestForm, User
+from app.models import AssemblyRun, Attempt, Candidate, CandidateAssignment, Question, TestForm, User
+from app.services import audit
 from app.services.assembly.algorithm import AssemblyConfig, preflight
-from app.services.assembly.service import DEFAULT_MIX, build_pool, preview, publish_run, run_assembly
+from app.services.assembly.service import DEFAULT_MIX, build_pool, preview, publish_checked, run_assembly
 from app.services.exposure.service import exposure_stats
 
 router = APIRouter(prefix="/assembly", tags=["test assembly"])
@@ -66,6 +67,7 @@ def _run_dict(db: Session, r: AssemblyRun, with_forms: bool = False) -> dict:
          "overlap": r.overlap, "duration_ms": r.duration_ms, "created_at": r.created_at, "created_by": user_label(db, r.created_by)}
     forms = db.scalars(select(TestForm).where(TestForm.assembly_run_id == r.id).order_by(TestForm.id)).all()
     d["form_count"] = len(forms)
+    d["needs_review"] = sum(1 for f in forms if f.status == "needs_review")
     d["published"] = sum(1 for f in forms if f.status == "published")
     if with_forms:
         d["forms"] = [_form_dict(db, f, manifest=True) for f in forms]
@@ -75,7 +77,10 @@ def _run_dict(db: Session, r: AssemblyRun, with_forms: bool = False) -> dict:
 def _form_dict(db: Session, f: TestForm, manifest: bool = False) -> dict:
     d = {"id": f.id, "code": f.code, "status": f.status, "slot": {"id": f.slot.id, "code": f.slot.code, "name": f.slot.name,
          "sequence": f.slot.sequence, "starts_at": f.slot.starts_at, "drive": f.slot.drive}, "seed": f.seed,
-         "duration_minutes": f.duration_minutes, "n_items": len(f.items), "validation": f.validation}
+         "duration_minutes": f.duration_minutes, "n_items": len(f.items), "validation": f.validation,
+         "flagged_attempts": db.scalar(select(func.count()).select_from(Attempt).where(Attempt.form_id == f.id, Attempt.review_flags.is_not(None))) or 0,
+         "assigned_candidates": [c for c, in db.execute(select(Candidate.code).join(CandidateAssignment, CandidateAssignment.candidate_id == Candidate.id)
+                                                        .where(CandidateAssignment.form_id == f.id).order_by(Candidate.code)).all()]}
     if manifest:
         stats = exposure_stats(db, f.slot.org_id, [i.question_id for i in f.items])
         items = []
@@ -136,9 +141,9 @@ def publish(run_id: int, user: User = Depends(require("assembly.run")), db: Sess
         raise NotFound("Assembly run not found")
     if r.status != "succeeded":
         raise Conflict("Only a verified (succeeded) assembly run can be published")
-    n = publish_run(db, r, user)
+    out = publish_checked(db, r, user)
     db.commit()
-    return {"published": n}
+    return out
 
 
 @router.get("/forms/{form_id}")
@@ -147,3 +152,56 @@ def form_manifest(form_id: int, user: User = Depends(require("assembly.read")), 
     if not f or f.slot.org_id != user.org_id:
         raise NotFound("Form not found")
     return _form_dict(db, f, manifest=True)
+
+
+class AssignIn(BaseModel):
+    candidate_codes: list[str] = Field(min_length=1, max_length=500)
+
+
+@router.get("/candidates")
+def candidates(q: str = "", user: User = Depends(require("assembly.read")), db: Session = Depends(get_db)):
+    stmt = select(Candidate).where(Candidate.org_id == user.org_id)
+    if q:
+        stmt = stmt.where(Candidate.code.ilike(f"%{q}%") | Candidate.display_name.ilike(f"%{q}%"))
+    rows = db.scalars(stmt.order_by(Candidate.user_id.is_(None), Candidate.code).limit(50)).all()
+    return [{"code": c.code, "name": c.display_name, "has_login": c.user_id is not None} for c in rows]
+
+
+@router.post("/forms/{form_id}/assignments", status_code=201)
+def assign(form_id: int, body: AssignIn, user: User = Depends(require("assembly.run")), db: Session = Depends(get_db)):
+    f = db.get(TestForm, form_id)
+    if not f or f.slot.org_id != user.org_id:
+        raise NotFound("Form not found")
+    if f.status not in ("draft", "published"):
+        raise Conflict(f"Candidates cannot be assigned to a form in status '{f.status}'")
+    codes = sorted({c.strip() for c in body.candidate_codes if c.strip()})
+    found = {c.code: c for c in db.scalars(select(Candidate).where(Candidate.org_id == user.org_id, Candidate.code.in_(codes))).all()}
+    missing = [c for c in codes if c not in found]
+    if missing:
+        raise Conflict("Unknown candidate code(s)", {"missing": missing[:20]})
+    added, skipped = [], []
+    for code, cand in found.items():
+        same_slot = db.scalar(select(CandidateAssignment.id).join(TestForm, TestForm.id == CandidateAssignment.form_id)
+                              .where(CandidateAssignment.candidate_id == cand.id, TestForm.slot_id == f.slot_id))
+        if same_slot:
+            skipped.append({"code": code, "reason": "already assigned to a form in this slot"})
+            continue
+        db.add(CandidateAssignment(candidate_id=cand.id, form_id=f.id, assigned_by=user.id))
+        added.append(code)
+    audit.record(db, user, "assembly.candidates_assigned", "test_form", f.code, f"Assigned {len(added)} candidate(s) to {f.code}",
+                 {"added": added, "skipped": skipped})
+    db.commit()
+    return {"added": added, "skipped": skipped}
+
+
+@router.get("/forms/{form_id}/attempts")
+def form_attempts(form_id: int, user: User = Depends(require("assembly.read")), db: Session = Depends(get_db)):
+    """Staff view of attempts on a form: status, official score and integrity review flags (no answers, no keys)."""
+    f = db.get(TestForm, form_id)
+    if not f or f.slot.org_id != user.org_id:
+        raise NotFound("Form not found")
+    rows = db.execute(select(Attempt, Candidate.code).join(Candidate, Candidate.id == Attempt.candidate_id)
+                      .where(Attempt.form_id == f.id).order_by(Attempt.id)).all()
+    return [{"attempt_id": a.id, "candidate": code, "status": a.status, "started_at": a.started_at,
+             "submitted_at": a.submitted_at, "score": a.score, "max_score": a.max_score, "review_flags": a.review_flags}
+            for a, code in rows]

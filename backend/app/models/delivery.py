@@ -69,6 +69,18 @@ class FormItem(Base):
     form: Mapped[TestForm] = relationship(back_populates="items")
 
 
+class CandidateAssignment(Base):
+    """Which candidate may take which form. Enforced server-side for listing, opening and starting attempts."""
+
+    __tablename__ = "candidate_assignments"
+    __table_args__ = (UniqueConstraint("candidate_id", "form_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), index=True)
+    form_id: Mapped[int] = mapped_column(ForeignKey("test_forms.id", ondelete="CASCADE"), index=True)
+    assigned_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Attempt(Base):
     __tablename__ = "attempts"
     __table_args__ = (UniqueConstraint("candidate_id", "form_id"),)
@@ -83,6 +95,9 @@ class Attempt(Base):
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     section_scores: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Staff-only integrity record: items withdrawn (quarantined/retired/leak-confirmed) while this attempt was live or
+    # after it was scored, with an alternative score excluding them. The official score is never changed silently.
+    review_flags: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_synthetic: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

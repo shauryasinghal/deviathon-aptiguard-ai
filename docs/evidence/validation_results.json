@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-29T07:46:26+00:00",
+  "generated_at": "2026-10-29T08:53:03+00:00",
   "data": "SYNTHETIC demo (seed 107). Not real-world accuracy.",
   "leak_detection": {
     "injected_items": 9,
@@ -9,9 +9,8 @@
     "alerts_on_non_injected_items_medium_plus": [],
     "precision_medium_plus": 1.0,
     "low_severity_alerts": [
-      "LOG-DIR-H2-V02",
-      "QNT-INT-M2-V02",
-      "QNT-RATIO-M2-V02"
+      "LOG-DIR-H3-V03",
+      "QNT-INT-M2-V02"
     ],
     "per_item": [
       {
@@ -22,12 +21,12 @@
         "first_detectable_slot": 3,
         "timeline": {
           "text_detectable_before_slot": 3,
-          "statistical_onset_slot": 3,
+          "statistical_onset_slot": 5,
           "exposure_slots": 10
         }
       },
       {
-        "item": "LOG-CODE-M2-V01",
+        "item": "LOG-DIR-M3-V02",
         "detected": true,
         "severity": "high",
         "evidence_class": "confirmed_text_match",
@@ -43,22 +42,22 @@
         "detected": true,
         "severity": "medium",
         "evidence_class": "statistical_suspicion",
-        "first_detectable_slot": 10,
+        "first_detectable_slot": 7,
         "timeline": {
           "text_detectable_before_slot": null,
-          "statistical_onset_slot": 10,
+          "statistical_onset_slot": 7,
           "exposure_slots": 10
         }
       },
       {
         "item": "LOG-SERIES-E1-S",
         "detected": true,
-        "severity": "critical",
+        "severity": "high",
         "evidence_class": "confirmed_text_match",
         "first_detectable_slot": 3,
         "timeline": {
           "text_detectable_before_slot": 3,
-          "statistical_onset_slot": 3,
+          "statistical_onset_slot": null,
           "exposure_slots": 10
         }
       },
@@ -75,7 +74,7 @@
         }
       },
       {
-        "item": "QNT-PROB-M1-V02",
+        "item": "QNT-RATIO-M3-V01",
         "detected": true,
         "severity": "high",
         "evidence_class": "confirmed_text_match",
@@ -94,7 +93,7 @@
         "first_detectable_slot": 3,
         "timeline": {
           "text_detectable_before_slot": 3,
-          "statistical_onset_slot": 3,
+          "statistical_onset_slot": 6,
           "exposure_slots": 10
         }
       },
@@ -106,19 +105,19 @@
         "first_detectable_slot": 3,
         "timeline": {
           "text_detectable_before_slot": 3,
-          "statistical_onset_slot": 3,
+          "statistical_onset_slot": 5,
           "exposure_slots": 10
         }
       },
       {
         "item": "VRB-SYN-E1-S",
         "detected": true,
-        "severity": "critical",
+        "severity": "high",
         "evidence_class": "confirmed_text_match",
         "first_detectable_slot": 3,
         "timeline": {
           "text_detectable_before_slot": 3,
-          "statistical_onset_slot": 4,
+          "statistical_onset_slot": null,
           "exposure_slots": 10
         }
       }
@@ -129,50 +128,50 @@
     "rasch_fitted": true,
     "simulated_non_parallel_variants": [
       {
-        "item": "VRB-ANALOGY-E1-V02",
+        "item": "QNT-SDT-H2-V02",
         "true_offset": 0.9,
-        "status": "outside_tolerance",
-        "estimated_diff": 1.049,
+        "status": "requires_review",
+        "estimated_diff": 0.267,
         "ci90": [
-          0.625,
-          1.473
+          -0.182,
+          0.715
         ]
       },
       {
-        "item": "VRB-ANT-H1-V01",
+        "item": "QNT-PROB-H3-V01",
         "true_offset": 0.95,
-        "status": "requires_review",
-        "estimated_diff": 0.597,
+        "status": "outside_tolerance",
+        "estimated_diff": 0.945,
         "ci90": [
-          0.159,
-          1.034
+          0.512,
+          1.377
         ]
       },
       {
-        "item": "LOG-ORDER-M2-V02",
+        "item": "QNT-SDT-E2-V02",
         "true_offset": -0.85,
-        "status": "requires_review",
-        "estimated_diff": -0.162,
+        "status": "outside_tolerance",
+        "estimated_diff": -1.218,
         "ci90": [
-          -0.578,
-          0.255
+          -1.745,
+          -0.692
         ]
       },
       {
-        "item": "LOG-SERIES-E3-V03",
+        "item": "VRB-ANALOGY-H2-V03",
         "true_offset": -0.9,
         "status": "requires_review",
-        "estimated_diff": -0.995,
+        "estimated_diff": -0.544,
         "ci90": [
-          -1.539,
-          -0.451
+          -0.972,
+          -0.117
         ]
       }
     ],
     "other_variant_status_counts": {
-      "insufficient_data": 80,
-      "requires_review": 41,
-      "within_tolerance": 4
+      "insufficient_data": 89,
+      "requires_review": 35,
+      "within_tolerance": 6
     }
   },
   "assembly": {

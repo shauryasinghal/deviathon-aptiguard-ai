@@ -21,6 +21,7 @@ from app.models.bank import (  # noqa: F401
 from app.models.delivery import (  # noqa: F401
     AssemblyRun,
     Attempt,
+    CandidateAssignment,
     ExposureEvent,
     FormItem,
     Response,

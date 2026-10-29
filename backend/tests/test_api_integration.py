@@ -12,7 +12,7 @@ V1 = "/api/v1"
 def test_health_and_readiness(client):
     assert client.get(f"{V1}/health").json()["status"] == "ok"
     r = client.get(f"{V1}/ready").json()
-    assert r["status"] == "ready" and r["migration"] == "0001"
+    assert r["status"] == "ready" and r["migration"] == "0003"
 
 
 def test_login_rejects_bad_password(client):
@@ -281,3 +281,41 @@ def test_policy_update_validation(client, auth):
     client.put(url, json={"values": {"max_adjacent_overlap_pct": 10.0}}, headers=auth("admin"))
     audit = client.get(f"{V1}/audit?action=settings", headers=auth("admin")).json()
     assert audit["total"] >= 2
+
+
+def test_no_approved_item_carries_a_failed_quality_check(db):
+    """Regression: the seed once approved 112 near-duplicates whose failed screen was only recorded, not enforced."""
+    from sqlalchemy import func, select
+
+    from app.models import Question, ValidationResult
+
+    bad = db.execute(select(Question.code, ValidationResult.check).join(ValidationResult, ValidationResult.question_id == Question.id)
+                     .where(Question.status == "approved", ValidationResult.status == "fail")).all()
+    assert bad == [], bad
+    per_tpl = dict(db.execute(select(Question.template_id, func.count()).where(Question.status == "approved", Question.org_id == 1, Question.template_id.is_not(None))
+                              .group_by(Question.template_id)).all())
+    assert len(per_tpl) == 16 and min(per_tpl.values()) >= 12
+
+
+def test_ready_returns_503_when_database_not_migrated(client, monkeypatch):
+    from sqlalchemy import text
+
+    from app.db.session import SessionLocal
+
+    class Broken:
+        def execute(self, stmt, *a, **k):
+            if "alembic_version" in str(stmt):
+                raise RuntimeError("no table")
+            return SessionLocal().execute(text("SELECT 1"))
+
+        def close(self):
+            pass
+
+    from app.db.session import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: Broken()
+    try:
+        assert client.get(f"{V1}/ready").status_code == 503
+    finally:
+        app.dependency_overrides.pop(get_db, None)

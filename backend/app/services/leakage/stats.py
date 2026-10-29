@@ -56,7 +56,20 @@ def mantel_haenszel(ref: pd.DataFrame, foc: pd.DataFrame, n_strata: int = 5) -> 
         used += 1
     if used == 0 or sum_var <= 0:
         return None
-    alpha = (num + 0.5) / (den + 0.5)  # small continuity guard against zero cells
+    if num > 0 and den > 0:
+        alpha = num / den  # Mantel–Haenszel common odds ratio
+    else:  # a zero sum: Haldane–Anscombe 0.5 correction on every cell so the ratio stays finite
+        num = den = 0.0
+        for _, s2 in both.groupby("stratum"):
+            r2, f2 = s2[s2.g == "R"], s2[s2.g == "F"]
+            if len(r2) == 0 or len(f2) == 0:
+                continue
+            a2, b2 = r2.score.sum() + 0.5, len(r2) - r2.score.sum() + 0.5
+            c2, d2 = f2.score.sum() + 0.5, len(f2) - f2.score.sum() + 0.5
+            n2 = a2 + b2 + c2 + d2
+            num += a2 * d2 / n2
+            den += b2 * c2 / n2
+        alpha = num / den
     delta = -2.35 * math.log(alpha)    # ETS scale; positive => easier for focal (later) group
     chi2 = (abs(sum_a - sum_ea) - 0.5) ** 2 / sum_var
     p = float(sps.chi2.sf(chi2, 1))

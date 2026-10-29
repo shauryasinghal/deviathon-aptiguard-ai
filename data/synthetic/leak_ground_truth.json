@@ -38,8 +38,8 @@
     },
     "L3_text_only": {
       "items": [
-        "QNT-PROB-M1-V02",
-        "LOG-CODE-M2-V01"
+        "QNT-RATIO-M3-V01",
+        "LOG-DIR-M3-V02"
       ],
       "posted_at_utc": "2026-09-17T12:30:00",
       "mechanism": "Video transcript posted after slot 8; items never re-administered, so no performance evidence."
@@ -51,20 +51,20 @@
   },
   "calibration_truth": {
     "drifted_variants_logit_offset": {
-      "VRB-ANALOGY-E1-V02": 0.9,
-      "VRB-ANT-H1-V01": 0.95,
-      "LOG-ORDER-M2-V02": -0.85,
-      "LOG-SERIES-E3-V03": -0.9
+      "QNT-SDT-H2-V02": 0.9,
+      "QNT-PROB-H3-V01": 0.95,
+      "QNT-SDT-E2-V02": -0.85,
+      "VRB-ANALOGY-H2-V03": -0.9
     },
     "note": "These administered variants were simulated as NOT parallel to their source."
   },
   "expected_alerts": {
     "critical_or_high": [
       "LOG-CODE-M1-S",
-      "LOG-CODE-M2-V01",
+      "LOG-DIR-M3-V02",
       "LOG-SERIES-E1-S",
       "QNT-PCT-M1-S",
-      "QNT-PROB-M1-V02",
+      "QNT-RATIO-M3-V01",
       "QNT-SDT-M1-S",
       "VRB-ANALOGY-M1-S",
       "VRB-SYN-E1-S"

@@ -57,7 +57,8 @@ def generate(qid: int, body: GenerateIn, user: User = Depends(require("variants.
 @router.get("/generation-runs")
 def runs(source_id: int | None = None, limit: int = 20, user: User = Depends(require("questions.read")),
          db: Session = Depends(get_db)):
-    stmt = select(GenerationRun).order_by(GenerationRun.id.desc()).limit(min(limit, 100))
+    stmt = (select(GenerationRun).join(Question, Question.id == GenerationRun.source_question_id)
+            .where(Question.org_id == user.org_id).order_by(GenerationRun.id.desc()).limit(max(1, min(limit, 100))))
     if source_id:
         stmt = stmt.where(GenerationRun.source_question_id == source_id)
     return [_run(db, r) for r in db.scalars(stmt).all()]

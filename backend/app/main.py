@@ -8,6 +8,7 @@ import uuid
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1 import assembly, assessment, auth, calibration, dashboard, exposure, leaks, questions, reports, system, variants
 from app.core.config import APP_VERSION, get_settings
@@ -40,7 +41,12 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
-    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+    rid = request.headers.get("X-Request-ID", "")
+    rid = rid if rid.isalnum() and len(rid) <= 64 else uuid.uuid4().hex[:16]  # never echo untrusted header content
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > settings.max_request_mb * 1024 * 1024:
+        return JSONResponse(status_code=413, content={"error": {"code": "payload_too_large",
+                                                                "message": f"Request exceeds {settings.max_request_mb} MB"}})
     t0 = time.perf_counter()
     response = await call_next(request)
     dur = round((time.perf_counter() - t0) * 1000, 1)
@@ -59,6 +65,3 @@ api = APIRouter(prefix="/api/v1")
 for r in (system, auth, dashboard, questions, variants, calibration, exposure, leaks, assembly, assessment, reports):
     api.include_router(r.router)
 app.include_router(api)
-
-if settings.using_insecure_secret and settings.app_env == "production":
-    raise RuntimeError("JWT_SECRET must be set in production")

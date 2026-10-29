@@ -46,7 +46,12 @@ export default function Assembler() {
   });
   const publish = useMutation({
     mutationFn: () => api<any>(`/assembly/runs/${runId}/publish`, { method: "POST" }),
-    onSuccess: (r) => { toast.success(`Published ${r.published} forms to candidates`); qc.invalidateQueries(); },
+    onSuccess: (r) => {
+      r.blocked?.length
+        ? toast.warning(`Published ${r.published}; ${r.blocked.length} form(s) blocked — ${r.blocked[0].items.map((i: any) => `${i.code} (${i.reason})`).join(", ")}`)
+        : toast.success(`Published ${r.published} form(s)`);
+      qc.invalidateQueries();
+    },
     onError: (e: ApiError) => toast.error(e.message),
   });
   const num = (k: keyof typeof DEF, label: string, max = 100) => (
@@ -103,7 +108,8 @@ export default function Assembler() {
                   </div>
                 )}
                 {r.status === "succeeded" && <div className="flex gap-2">
-                  {can("assembly.run") && <Button size="sm" variant="primary" disabled={r.published === r.form_count} loading={publish.isPending} onClick={() => publish.mutate()}><Rocket />{r.published === r.form_count ? "Published" : "Publish forms"}</Button>}
+                  {can("assembly.run") && <Button size="sm" variant="primary" disabled={!forms.some((f: any) => f.status === "draft")} loading={publish.isPending} onClick={() => publish.mutate()}><Rocket />{forms.some((f: any) => f.status === "draft") ? "Publish draft forms" : "No draft forms"}</Button>}
+                  {r.needs_review > 0 && <Badge tone="warn">{r.needs_review} form(s) need reassessment</Badge>}
                   <Button size="sm" variant="outline" onClick={exportCsv}><Download />Export manifests</Button>
                 </div>}
               </CardBody>
@@ -128,7 +134,15 @@ export default function Assembler() {
                 </CardBody></Card>
               <Card><CardHeader title="Per-slot manifest" actions={<Select ariaLabel="Form" value={String(formIdx)} onChange={(v) => setFormIdx(Number(v))} options={forms.map((f: any, i: number) => ({ value: String(i), label: f.code }))} />} />
                 {forms[formIdx] && <>
-                  <CardBody className="pb-0 text-[12.5px] text-fg-muted">Slot {forms[formIdx].slot.sequence} · {fmtDate(forms[formIdx].slot.starts_at)} · status {forms[formIdx].status} · {Object.entries(forms[formIdx].validation.difficulty_distribution).map(([k, v]) => `${k} ${v}`).join(", ")}</CardBody>
+                  {forms[formIdx].status === "needs_review" && (
+                    <div className="mx-5 mt-4 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-[12.5px] text-warn">
+                      Blocked for new attempts: {forms[formIdx].validation?.reassessment?.reason}. Re-assemble, or release the item after review.</div>)}
+                  {forms[formIdx].flagged_attempts > 0 && (
+                    <div className="mx-5 mt-3 rounded-md border border-info/30 bg-info-soft px-3 py-2 text-[12.5px] text-info">
+                      {forms[formIdx].flagged_attempts} attempt(s) on this form include a withdrawn item. They were not invalidated: the official
+                      score stands and an alternative score excluding the item is recorded for staff review (API: /assembly/forms/{forms[formIdx].id}/attempts).</div>)}
+                  <AssignPanel form={forms[formIdx]} canAssign={can("assembly.run")} />
+                  <CardBody className="pb-0 text-[12.5px] text-fg-muted">Slot {forms[formIdx].slot.sequence} · {fmtDate(forms[formIdx].slot.starts_at)} · <StatusBadge kind="form" value={forms[formIdx].status} /> · {Object.entries(forms[formIdx].validation.difficulty_distribution).map(([k, v]) => `${k} ${v}`).join(", ")}</CardBody>
                   <Table><THead><tr><Th>#</Th><Th>Item</Th><Th>Family</Th><Th>Variant of</Th><Th>Section</Th><Th>Difficulty</Th><Th className="text-right">Prior slots</Th><Th>Leak</Th></tr></THead>
                     <tbody>{forms[formIdx].items.map((i: any) => (
                       <Tr key={i.position}><Td className="tabular">{i.position}</Td><Td><Mono className="text-fg">{i.code}</Mono></Td><Td><Mono>{i.family_code}</Mono></Td>
@@ -141,5 +155,29 @@ export default function Assembler() {
         </div>
       </div>
     </div>
+  );
+}
+
+function AssignPanel({ form, canAssign }: { form: any; canAssign: boolean }) {
+  const qc = useQueryClient();
+  const [codes, setCodes] = useState("");
+  const m = useMutation({
+    mutationFn: () => api<any>(`/assembly/forms/${form.id}/assignments`, { body: { candidate_codes: codes.split(/[\s,]+/).filter(Boolean) } }),
+    onSuccess: (r) => {
+      toast.success(`Assigned ${r.added.length}${r.skipped.length ? `; skipped ${r.skipped.map((x: any) => `${x.code} (${x.reason})`).join(", ")}` : ""}`);
+      setCodes(""); qc.invalidateQueries({ queryKey: ["asm-run"] });
+    },
+    onError: (e: ApiError) => toast.error(e.message + ((e.details as any)?.missing ? `: ${(e.details as any).missing.join(", ")}` : "")),
+  });
+  return (
+    <CardBody className="space-y-2 border-b border-line">
+      <div className="text-[12.5px] text-fg-muted">Assigned candidates ({form.assigned_candidates.length}): {form.assigned_candidates.length ? form.assigned_candidates.map((c: string) => <Mono key={c} className="mr-2 text-fg">{c}</Mono>) : "none — candidates can only see forms assigned to them."}</div>
+      {canAssign && ["draft", "published"].includes(form.status) && (
+        <div className="flex gap-2">
+          <Input aria-label="Candidate codes to assign" placeholder="Candidate codes, e.g. DEMO-CAND-03" value={codes} onChange={(e) => setCodes(e.target.value)} className="max-w-sm" />
+          <Button size="sm" variant="outline" disabled={!codes.trim()} loading={m.isPending} onClick={() => m.mutate()}>Assign</Button>
+        </div>
+      )}
+    </CardBody>
   );
 }

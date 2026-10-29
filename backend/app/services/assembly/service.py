@@ -154,14 +154,81 @@ def _ensure_slots(db: Session, org_id: int, drive: str, n: int, start: datetime)
 
 
 def publish_run(db: Session, run: AssemblyRun, user: User | None) -> int:
-    forms = db.scalars(select(TestForm).where(TestForm.assembly_run_id == run.id)).all()
-    n = 0
-    for f in forms:
-        if f.status == "draft":
-            f.status = "published"
-            n += 1
-    audit.record(db, user, "assembly.published", "assembly_run", run.id, f"Published {n} form(s) of run #{run.id}")
-    return n
+    return publish_checked(db, run, user)["published"]
 
 
 _ = func
+
+
+# ------------------------------------------------------------------ form integrity after item withdrawal
+WITHDRAWN_LEAK = ("suspected", "confirmed")
+
+
+def item_ineligible_reason(q: Question) -> str | None:
+    if q.status != "approved":
+        return f"status '{q.status}'"
+    if q.leak_status in WITHDRAWN_LEAK:
+        return f"leak status '{q.leak_status}'"
+    return None
+
+
+def flag_forms_for_item(db: Session, question_id: int, reason: str, user: User | None = None) -> list[str]:
+    """Mark every non-historical form containing the item as needing reassessment; blocks new attempts.
+    Attempts already started on those forms continue and are flagged for staff review (see services.assessment)."""
+    from app.services.assessment import flag_attempts_for_item
+
+    flag_attempts_for_item(db, question_id, reason, user)
+    forms = db.scalars(select(TestForm).join(FormItem, FormItem.form_id == TestForm.id)
+                       .where(FormItem.question_id == question_id, TestForm.status.in_(("draft", "published")))).all()
+    codes = []
+    for f in forms:
+        v = dict(f.validation or {})
+        v["reassessment"] = {"previous_status": f.status, "reason": reason, "question_id": question_id}
+        f.validation = v
+        f.status = "needs_review"
+        codes.append(f.code)
+    if codes:
+        audit.record(db, user, "assembly.forms_flagged", "question", question_id,
+                     f"{len(codes)} form(s) flagged for reassessment: {reason}"[:400], {"forms": codes})
+    return codes
+
+
+def restore_forms_if_clean(db: Session, question_id: int, user: User | None = None) -> list[str]:
+    """After an item is released, restore flagged forms only if *all* their items are eligible again."""
+    from app.services.assessment import note_item_released
+
+    note_item_released(db, question_id, user)
+    forms = db.scalars(select(TestForm).join(FormItem, FormItem.form_id == TestForm.id)
+                       .where(FormItem.question_id == question_id, TestForm.status == "needs_review")).all()
+    restored = []
+    for f in forms:
+        if any(item_ineligible_reason(db.get(Question, fi.question_id)) for fi in f.items):
+            continue
+        v = dict(f.validation or {})
+        prev = (v.pop("reassessment", None) or {}).get("previous_status", "draft")
+        f.validation, f.status = v, prev
+        restored.append(f.code)
+    if restored:
+        audit.record(db, user, "assembly.forms_restored", "question", question_id,
+                     f"{len(restored)} form(s) restored after item release", {"forms": restored})
+    return restored
+
+
+def publish_checked(db: Session, run: AssemblyRun, user: User | None) -> dict:
+    """Publish draft forms of a verified run, re-checking every item's eligibility at publish time."""
+    forms = db.scalars(select(TestForm).where(TestForm.assembly_run_id == run.id)).all()
+    published, blocked = [], []
+    for f in forms:
+        if f.status != "draft":
+            continue
+        bad = [(db.get(Question, fi.question_id).code, item_ineligible_reason(db.get(Question, fi.question_id)))
+               for fi in f.items]
+        bad = [b for b in bad if b[1]]
+        if bad:
+            blocked.append({"form": f.code, "items": [{"code": c, "reason": r} for c, r in bad]})
+            continue
+        f.status = "published"
+        published.append(f.code)
+    audit.record(db, user, "assembly.published", "assembly_run", run.id,
+                 f"Published {len(published)} form(s) of run #{run.id}; {len(blocked)} blocked")
+    return {"published": len(published), "blocked": blocked}

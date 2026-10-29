@@ -24,6 +24,28 @@ export default function Assessment() {
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const shownAt = useRef(Date.now());
+  const unsaved = useRef<Map<number, { item_ref: number; selected_key: string; time_spent_ms?: number }>>(new Map());
+
+  // Persist every unsaved answer in one request; failures stay queued and are retried on the next save / submit.
+  const flush = useCallback(async (attemptId: number) => {
+    if (!unsaved.current.size) return true;
+    // Take the entries out of the queue *before* sending, so overlapping saves never send the same entry twice
+    // (the server adds time_spent_ms, so a duplicate send would inflate response-time data).
+    const batch = [...unsaved.current.values()];
+    batch.forEach((b) => unsaved.current.delete(b.item_ref));
+    setSaving("saving");
+    try {
+      await api(`/assessment/attempts/${attemptId}/responses`, { method: "PUT", body: { answers: batch } });
+      setSaving(unsaved.current.size ? "error" : "saved");
+      return unsaved.current.size === 0;
+    } catch (e) {
+      // re-queue unless a newer answer for the same item was chosen meanwhile
+      batch.forEach((b) => { if (!unsaved.current.has(b.item_ref)) unsaved.current.set(b.item_ref, b); });
+      setSaving("error");
+      toast.error(`${(e as ApiError).message} — your answer is kept and will be retried.`);
+      return false;
+    }
+  }, []);
 
   const start = useMutation({
     mutationFn: () => api<any>(`/assessment/forms/${formId}/attempts`, { method: "POST" }),
@@ -31,7 +53,10 @@ export default function Assessment() {
     onError: (e: ApiError) => toast.error(e.message),
   });
   const submit = useMutation({
-    mutationFn: () => api<any>(`/assessment/attempts/${attempt.attempt_id}/submit`, { method: "POST" }),
+    mutationFn: async () => {
+      if (!(await flush(attempt.attempt_id))) throw new ApiError(0, "unsaved", "Some answers could not be saved. Check your connection and try again.");
+      return api<any>(`/assessment/attempts/${attempt.attempt_id}/submit`, { method: "POST" });
+    },
     onSuccess: (a) => { setAttempt(a); setConfirm(false); qc.invalidateQueries({ queryKey: ["available"] }); toast.success("Assessment submitted"); },
     onError: (e: ApiError) => toast.error(e.message),
   });
@@ -47,13 +72,10 @@ export default function Assessment() {
   const choose = useCallback(async (key: string) => {
     if (!item || attempt?.status !== "in_progress") return;
     setAnswers((a) => ({ ...a, [item.item_ref]: key }));
-    setSaving("saving");
-    try {
-      await api(`/assessment/attempts/${attempt.attempt_id}/responses`, { method: "PUT", body: { answers: [{ item_ref: item.item_ref, selected_key: key, time_spent_ms: Date.now() - shownAt.current }] } });
-      shownAt.current = Date.now();
-      setSaving("saved");
-    } catch (e) { setSaving("error"); toast.error((e as ApiError).message); }
-  }, [item, attempt]);
+    unsaved.current.set(item.item_ref, { item_ref: item.item_ref, selected_key: key, time_spent_ms: Date.now() - shownAt.current });
+    shownAt.current = Date.now();
+    await flush(attempt.attempt_id);
+  }, [item, attempt, flush]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -107,7 +129,7 @@ export default function Assessment() {
       <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-line bg-canvas/90 px-4 backdrop-blur">
         <Logo collapsed /><span className="hidden truncate text-sm font-medium sm:block">{f.slot}</span>
         <span className="flex-1" />
-        <span className="text-[12px] text-fg-subtle" aria-live="polite">{saving === "saving" ? "Saving…" : saving === "saved" ? "All answers saved" : saving === "error" ? "Save failed" : ""}</span>
+        <span className="text-[12px] text-fg-subtle" aria-live="polite">{saving === "saving" ? "Saving…" : saving === "saved" ? "All answers saved" : saving === "error" ? `${unsaved.current.size} answer(s) not yet saved — will retry` : ""}</span>
         <span className={cn("flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-sm tabular", remaining < 300 ? "border-danger/40 text-danger" : "border-line-strong")} role="timer" aria-label={`Time remaining ${mm} minutes ${ss} seconds`}>
           <Clock className="size-4" />{mm}:{ss}</span>
         <Button variant="primary" size="sm" onClick={() => setConfirm(true)}><Send />Submit</Button>

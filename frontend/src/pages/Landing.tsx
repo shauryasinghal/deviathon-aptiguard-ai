@@ -250,7 +250,7 @@ export default function Landing() {
         <div className="mx-auto flex max-w-6xl flex-col items-center px-5 py-16 text-center">
           <LogoMark className="size-10" />
           <h2 className="mt-4 text-[26px] font-semibold tracking-tight">See the integrity loop end to end.</h2>
-          <p className="mt-2 max-w-lg text-sm text-fg-muted">Seeded synthetic demo: 593 items, 10 historical slots, 45,000 responses and a deliberately simulated leak.</p>
+          <p className="mt-2 max-w-lg text-sm text-fg-muted">Seeded synthetic demo: a three-section item bank, 10 historical slots, 45,000 simulated responses and a deliberately injected leak.</p>
           <Button asChild variant="primary" size="lg" className="mt-6"><Link to="/login">Open the demo<ArrowRight /></Link></Button>
         </div>
       </section>

@@ -180,7 +180,7 @@ export default function Dashboard() {
                     </div>
                   );
                 })}
-                <p className="pt-1 text-[11.5px] text-fg-subtle">Equivalence requires the 90% CI of the difficulty difference to fall within ±{d?.calibration?.run_id ? "tolerance" : "—"} (TOST).</p>
+                <p className="pt-1 text-[11.5px] text-fg-subtle">Equivalence requires the whole 90% CI of the difficulty difference to fall inside the configured tolerance (TOST); a non-significant difference alone is never treated as equivalence.</p>
               </CardBody>
             </Card>
 

@@ -116,6 +116,13 @@ def set_item_state(db: Session, q: Question, target: str, user: User, reason: st
 
     add_revision(db, q, "status_change", user, f"{prev} → {target}: {reason}")
     audit.record(db, user, f"exposure.{target}", "question", q.code, f"{q.code}: {prev} → {target} ({reason})")
+    from app.services.assembly.service import flag_forms_for_item, restore_forms_if_clean
+
+    db.flush()
+    if target in ("quarantined", "retired"):
+        flag_forms_for_item(db, q.id, f"{q.code} {target}: {reason}", user)
+    else:
+        restore_forms_if_clean(db, q.id, user)
     return q
 
 

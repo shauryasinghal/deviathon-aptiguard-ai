@@ -44,6 +44,11 @@ DEFAULT_POLICIES: dict[str, dict] = {
         "require_independent_reviewer": True,   # creator of an item may not approve it
         "verbal_requires_second_look": True,
     },
+    "assessment": {
+        "enforce_slot_window": True,     # candidates may only start inside their slot's window
+        "early_entry_minutes": 15,
+        "late_entry_minutes": 30,        # after slot start; attempts still end at their own deadline
+    },
     "retention": {
         "response_retention_days": 365,
         "audit_retention_days": 730,

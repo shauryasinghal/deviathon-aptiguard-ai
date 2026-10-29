@@ -122,6 +122,9 @@ def change_state(qid: int, action: Literal["quarantine", "retire", "release"], b
 
 @router.get("/items/{qid}/history")
 def item_history(qid: int, user: User = Depends(require("exposure.read")), db: Session = Depends(get_db)):
+    q = db.get(Question, qid)
+    if not q or q.org_id != user.org_id:
+        raise NotFound("Question not found")
     rows = db.execute(select(ExposureEvent, Slot, TestForm).join(Slot, Slot.id == ExposureEvent.slot_id)
                       .join(TestForm, TestForm.id == ExposureEvent.form_id).where(ExposureEvent.question_id == qid)
                       .order_by(ExposureEvent.occurred_at)).all()

@@ -258,6 +258,10 @@ def run_detection(db: Session, org_id: int, user: User | None, replay: bool = Tr
             created += 1
         if sev in ("critical", "high") and q.leak_status in ("none",):
             q.leak_status = "suspected"
+            from app.services.assembly.service import flag_forms_for_item
+
+            db.flush()
+            flag_forms_for_item(db, q.id, f"{q.code}: suspected leak ({sev} alert)", user)
         counts[sev] += 1
 
     run.duration_ms = int((time.perf_counter() - t0) * 1000)
@@ -322,6 +326,10 @@ def transition_alert(db: Session, alert: LeakAlert, action: str, user: User, not
         q.leak_status = "confirmed"
         if q.status in ("approved", "pending_review"):
             q.status, q.status_reason = "quarantined", f"Leak confirmed via {alert.code}"
+        from app.services.assembly.service import flag_forms_for_item
+
+        db.flush()
+        flag_forms_for_item(db, q.id, f"{q.code}: leak confirmed via {alert.code}", user)
     elif action == "dismiss":
         alert.reviewer_id, alert.reviewer_decision, alert.decided_at = user.id, note, utcnow()
         inv.closed_at, inv.resolution, inv.summary = utcnow(), "dismissed", note
@@ -329,6 +337,10 @@ def transition_alert(db: Session, alert: LeakAlert, action: str, user: User, not
             LeakAlert.question_id == q.id, LeakAlert.id != alert.id, LeakAlert.status.in_(("open", "acknowledged", "investigating", "confirmed"))))
         if not others and q.leak_status != "confirmed":
             q.leak_status = "cleared"
+            from app.services.assembly.service import restore_forms_if_clean
+
+            db.flush()
+            restore_forms_if_clean(db, q.id, user)
     elif action == "reopen":
         inv.closed_at = None
         alert.decided_at = None
