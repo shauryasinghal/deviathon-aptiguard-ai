@@ -12,7 +12,7 @@ from app.core.ratelimit import key_for, login_limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.base import utcnow
 from app.db.session import get_db
-from app.models import Candidate, User
+from app.models import Candidate, Organization, User
 from app.services import audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -47,9 +47,14 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     ok = verify_password(body.password, u.password_hash if u else _DUMMY_HASH)
     if not u or not ok or not u.is_active:
         login_limiter.fail(db, key, s.login_window_seconds)
-        audit.record(db, None, "auth.login_failed", "user", None, "Failed login attempt",
-                     {"email_domain": email.split("@")[-1],
-                      "reason": "inactive" if (u and ok and not u.is_active) else "invalid_credentials"}, org_id=1)
+        # Attribute to the account's organisation, else the first one. A freshly bootstrapped database has no
+        # organisation yet (audit_events.org_id is a NOT NULL foreign key); the limiter still records the failure.
+        org_id = u.org_id if u else db.scalar(select(Organization.id).order_by(Organization.id).limit(1))
+        if org_id is not None:
+            audit.record(db, None, "auth.login_failed", "user", None, "Failed login attempt",
+                         {"email_domain": email.split("@")[-1],
+                          "reason": "inactive" if (u and ok and not u.is_active) else "invalid_credentials"},
+                         org_id=org_id)
         db.commit()
         # One message for unknown user, wrong password and inactive account (no account enumeration).
         raise AppError("Invalid email or password", status_code=401, code="invalid_credentials")

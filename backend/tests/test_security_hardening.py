@@ -144,3 +144,59 @@ def test_bootstrap_is_idempotent_and_create_admin_enforces_policy(db):
     assert db.scalar(select(Section).where(Section.code == "VERBAL")) is not None
     db.rollback()
     assert db.scalar(select(User).where(User.email == "boss@acme.test")) is None
+
+
+def test_failed_login_on_fresh_database_without_organisation_returns_401(tmp_path, client):
+    """Fresh production database (migrated + bootstrapped, no organisation yet): a failed login must be a clean 401,
+    not a foreign-key error on the audit row. Regression for the Docker production smoke test."""
+    from alembic import command
+    from alembic.config import Config
+    from pathlib import Path
+    import os
+
+    from sqlalchemy import create_engine, event, func
+    from sqlalchemy.orm import sessionmaker
+
+    from app.bootstrap import ensure_reference_data
+    from app.db.session import get_db
+    from app.main import app
+    from app.models import AuditEvent, AuthFailure, Organization
+
+    url = f"sqlite:///{tmp_path}/fresh.db"
+    backend = Path(__file__).resolve().parents[1]
+    cfg = Config(str(backend / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend / "alembic"))
+    old = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = url
+    get_settings.cache_clear()
+    try:
+        command.upgrade(cfg, "head")
+    finally:
+        if old is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = old
+        get_settings.cache_clear()
+    eng = create_engine(url)
+    event.listen(eng, "connect", lambda c, _: c.execute("PRAGMA foreign_keys=ON"))  # enforce the FK as PostgreSQL does
+    Fresh = sessionmaker(bind=eng)
+    with Fresh() as s:
+        ensure_reference_data(s)
+        s.commit()
+        assert s.scalar(select(func.count()).select_from(Organization)) == 0
+
+    def _fresh_db():
+        with Fresh() as s:
+            yield s
+
+    app.dependency_overrides[get_db] = _fresh_db
+    try:
+        r = client.post("/api/v1/auth/login", json={"email": "admin@aptiguard.demo", "password": "AptiGuard-Demo-2026"})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+    assert r.status_code == 401, r.text
+    assert r.json()["error"]["code"] == "invalid_credentials"
+    with Fresh() as s:
+        assert s.scalar(select(func.count()).select_from(AuthFailure)) == 1  # limiter still counts the failure
+        assert s.scalar(select(func.count()).select_from(AuditEvent)) == 0  # no organisation to attribute it to
+    eng.dispose()

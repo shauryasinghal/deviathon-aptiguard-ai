@@ -5,9 +5,9 @@ shell (Playwright 1.64). Docker is not installed locally. Every row below was ex
 
 | Check | Command | Result |
 |---|---|---|
-| Backend unit + integration (SQLite) | `cd backend && .venv/bin/python -m pytest -q` | **219 passed** |
-| Backend unit + integration (PostgreSQL 17) | `TEST_DATABASE_URL=postgresql+psycopg://…/aptiguard_test …pytest -q` | **219 passed** |
-| Clean checkout | fresh copy of the tree → `./setup.sh` → backend tests | **setup OK, 219 passed** |
+| Backend unit + integration (SQLite) | `cd backend && .venv/bin/python -m pytest -q` | **220 passed** |
+| Backend unit + integration (PostgreSQL 17) | `TEST_DATABASE_URL=postgresql+psycopg://…/aptiguard_test …pytest -q` | **220 passed** |
+| Clean checkout | fresh copy of the tree → `./setup.sh` → backend tests | **setup OK, 219 passed (before the 220th test was added)** |
 | Migrations from scratch + drift | `alembic upgrade head && alembic check` | **no drift** on SQLite and PostgreSQL |
 | PostgreSQL downgrade/upgrade | `alembic downgrade 0003 && alembic upgrade head && alembic check` | **pass** |
 | Live concurrency (4 uvicorn workers) | `scripts/concurrency_check.py` | **pass** on SQLite and PostgreSQL (below) |
@@ -44,13 +44,13 @@ approve · 3+4 assemble verified forms → publish → assign → candidate atte
 evidence → confirm and quarantine · 6 calibration → CSV export · 7 item quarantined during a live attempt → reviewer
 resolves the flag in the UI · 8 author cannot approve own item (server-enforced, shown in UI).
 
-## Backend suite composition (219)
+## Backend suite composition (220)
 - `test_auth_security.py` — demo sign-in per role, email normalisation, unknown-user/wrong-password parity, inactive
   accounts, 7 bad-token classes, rate limiting, no password in audit, production guard, `APP_ENV` validation,
   sanitised configuration errors, demo credentials hidden when demo mode is off, seed refusal, headers.
 - `test_security_hardening.py` — logout revokes all sessions, admin revocation (allowed/denied/404), limiter shared and
   persistent with hashed keys, audit chain verification + tamper and deletion detection, migration 0004 backfill,
-  bootstrap idempotence and admin password policy.
+  bootstrap idempotence and admin password policy, failed login on a fresh database with no organisation (401, not 500).
 - `test_access_control.py` — assignment-only access, unpublished forms, slot window, deadline + auto-submit, partial
   batches, quarantine → reassessment → release, publish re-check, assignment rules, cross-organisation isolation,
   413, live-attempt flag policy, save-vs-submit race (proven to fail without the guard), other candidates' attempts,
