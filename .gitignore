@@ -1,0 +1,40 @@
+# Secrets & local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+.claude/
+
+# Python
+backend/.venv/
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Local databases (may contain candidate responses)
+backend/var/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Node / build artifacts
+node_modules/
+frontend/dist/
+frontend/node_modules/.tmp/
+*.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log

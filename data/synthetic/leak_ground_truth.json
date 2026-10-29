@@ -1,0 +1,76 @@
+{
+  "WARNING": "SYNTHETIC ground truth for the deterministic demo (seed 107). Not real-world data. The detection pipeline never reads this file; it is used only by scripts/run_validation.py.",
+  "historical_drive": "Campus Drive 2026-Q3 (synthetic)",
+  "slots": 10,
+  "candidates_per_slot": 150,
+  "slot_mean_ability": [
+    0.0,
+    0.05,
+    -0.05,
+    0.3,
+    0.0,
+    0.05,
+    -0.1,
+    0.05,
+    0.35,
+    0.1
+  ],
+  "design": "12 core items reused in all 10 slots (legacy practice) + 18 slot-specific items per slot",
+  "injections": {
+    "L1_text_and_performance": {
+      "items": [
+        "QNT-PCT-M1-S",
+        "QNT-SDT-M1-S",
+        "LOG-SERIES-E1-S",
+        "LOG-CODE-M1-S",
+        "VRB-SYN-E1-S",
+        "VRB-ANALOGY-M1-S"
+      ],
+      "posted_at_utc": "2026-09-14T13:10:00",
+      "mechanism": "Posted to synthetic Telegram exports after slot 2. Candidates in slot s>=3 'saw' the leak with probability {3: 0.3, 4: 0.45, 5: 0.55, 6: 0.6, 7: 0.6, 8: 0.6, 9: 0.6, 10: 0.6}; those candidates answer the leaked item correctly with p=0.9 and 70% faster.",
+      "variants": "4 verbatim, 1 paraphrased (same numbers), 1 with OCR-style character noise"
+    },
+    "L2_statistical_only": {
+      "items": [
+        "LOG-ORDER-H1-S"
+      ],
+      "mechanism": "Circulated via a channel NOT in the dataset; reach by slot {6: 0.35, 7: 0.4, 8: 0.45, 9: 0.45, 10: 0.45}. No text exists."
+    },
+    "L3_text_only": {
+      "items": [
+        "QNT-PROB-M1-V02",
+        "LOG-CODE-M2-V01"
+      ],
+      "posted_at_utc": "2026-09-17T12:30:00",
+      "mechanism": "Video transcript posted after slot 8; items never re-administered, so no performance evidence."
+    },
+    "family_level_decoys": "3 forum posts generated from bank templates with new numbers (concept-level exposure only)",
+    "unrelated_posts": 25,
+    "duplicate_records": 1,
+    "ability_confounders": "Slots 4 and 9 have stronger cohorts (+0.30/+0.35 logits); ability-adjusted tests must not flag them."
+  },
+  "calibration_truth": {
+    "drifted_variants_logit_offset": {
+      "VRB-ANALOGY-E1-V02": 0.9,
+      "VRB-ANT-H1-V01": 0.95,
+      "LOG-ORDER-M2-V02": -0.85,
+      "LOG-SERIES-E3-V03": -0.9
+    },
+    "note": "These administered variants were simulated as NOT parallel to their source."
+  },
+  "expected_alerts": {
+    "critical_or_high": [
+      "LOG-CODE-M1-S",
+      "LOG-CODE-M2-V01",
+      "LOG-SERIES-E1-S",
+      "QNT-PCT-M1-S",
+      "QNT-PROB-M1-V02",
+      "QNT-SDT-M1-S",
+      "VRB-ANALOGY-M1-S",
+      "VRB-SYN-E1-S"
+    ],
+    "statistical": [
+      "LOG-ORDER-H1-S"
+    ]
+  }
+}

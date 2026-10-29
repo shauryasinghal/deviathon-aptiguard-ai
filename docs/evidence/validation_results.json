@@ -1,0 +1,188 @@
+{
+  "generated_at": "2026-10-29T07:46:26+00:00",
+  "data": "SYNTHETIC demo (seed 107). Not real-world accuracy.",
+  "leak_detection": {
+    "injected_items": 9,
+    "detected": 9,
+    "missed": [],
+    "recall": 1.0,
+    "alerts_on_non_injected_items_medium_plus": [],
+    "precision_medium_plus": 1.0,
+    "low_severity_alerts": [
+      "LOG-DIR-H2-V02",
+      "QNT-INT-M2-V02",
+      "QNT-RATIO-M2-V02"
+    ],
+    "per_item": [
+      {
+        "item": "LOG-CODE-M1-S",
+        "detected": true,
+        "severity": "critical",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 3,
+        "timeline": {
+          "text_detectable_before_slot": 3,
+          "statistical_onset_slot": 3,
+          "exposure_slots": 10
+        }
+      },
+      {
+        "item": "LOG-CODE-M2-V01",
+        "detected": true,
+        "severity": "high",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 9,
+        "timeline": {
+          "text_detectable_before_slot": 9,
+          "statistical_onset_slot": null,
+          "exposure_slots": 1
+        }
+      },
+      {
+        "item": "LOG-ORDER-H1-S",
+        "detected": true,
+        "severity": "medium",
+        "evidence_class": "statistical_suspicion",
+        "first_detectable_slot": 10,
+        "timeline": {
+          "text_detectable_before_slot": null,
+          "statistical_onset_slot": 10,
+          "exposure_slots": 10
+        }
+      },
+      {
+        "item": "LOG-SERIES-E1-S",
+        "detected": true,
+        "severity": "critical",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 3,
+        "timeline": {
+          "text_detectable_before_slot": 3,
+          "statistical_onset_slot": 3,
+          "exposure_slots": 10
+        }
+      },
+      {
+        "item": "QNT-PCT-M1-S",
+        "detected": true,
+        "severity": "critical",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 3,
+        "timeline": {
+          "text_detectable_before_slot": 3,
+          "statistical_onset_slot": 5,
+          "exposure_slots": 10
+        }
+      },
+      {
+        "item": "QNT-PROB-M1-V02",
+        "detected": true,
+        "severity": "high",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 9,
+        "timeline": {
+          "text_detectable_before_slot": 9,
+          "statistical_onset_slot": null,
+          "exposure_slots": 1
+        }
+      },
+      {
+        "item": "QNT-SDT-M1-S",
+        "detected": true,
+        "severity": "critical",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 3,
+        "timeline": {
+          "text_detectable_before_slot": 3,
+          "statistical_onset_slot": 3,
+          "exposure_slots": 10
+        }
+      },
+      {
+        "item": "VRB-ANALOGY-M1-S",
+        "detected": true,
+        "severity": "critical",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 3,
+        "timeline": {
+          "text_detectable_before_slot": 3,
+          "statistical_onset_slot": 3,
+          "exposure_slots": 10
+        }
+      },
+      {
+        "item": "VRB-SYN-E1-S",
+        "detected": true,
+        "severity": "critical",
+        "evidence_class": "confirmed_text_match",
+        "first_detectable_slot": 3,
+        "timeline": {
+          "text_detectable_before_slot": 3,
+          "statistical_onset_slot": 4,
+          "exposure_slots": 10
+        }
+      }
+    ]
+  },
+  "calibration": {
+    "method": "CTT + Rasch (MML-EM, N(0,1) ability prior)",
+    "rasch_fitted": true,
+    "simulated_non_parallel_variants": [
+      {
+        "item": "VRB-ANALOGY-E1-V02",
+        "true_offset": 0.9,
+        "status": "outside_tolerance",
+        "estimated_diff": 1.049,
+        "ci90": [
+          0.625,
+          1.473
+        ]
+      },
+      {
+        "item": "VRB-ANT-H1-V01",
+        "true_offset": 0.95,
+        "status": "requires_review",
+        "estimated_diff": 0.597,
+        "ci90": [
+          0.159,
+          1.034
+        ]
+      },
+      {
+        "item": "LOG-ORDER-M2-V02",
+        "true_offset": -0.85,
+        "status": "requires_review",
+        "estimated_diff": -0.162,
+        "ci90": [
+          -0.578,
+          0.255
+        ]
+      },
+      {
+        "item": "LOG-SERIES-E3-V03",
+        "true_offset": -0.9,
+        "status": "requires_review",
+        "estimated_diff": -0.995,
+        "ci90": [
+          -1.539,
+          -0.451
+        ]
+      }
+    ],
+    "other_variant_status_counts": {
+      "insufficient_data": 80,
+      "requires_review": 41,
+      "within_tolerance": 4
+    }
+  },
+  "assembly": {
+    "run_id": 1,
+    "status": "succeeded",
+    "adjacent_pairs": 9,
+    "max_adjacent_shared": 0,
+    "max_adjacent_smaller_form_pct": 0.0,
+    "limit_pct": 10.0,
+    "all_adjacent_constraints_ok": true,
+    "verification_violations": []
+  }
+}
