@@ -127,17 +127,26 @@ def set_item_state(db: Session, q: Question, target: str, user: User, reason: st
 
 
 def record_administration(db: Session, form, slot_id: int, n_candidates: int = 1, when: datetime | None = None) -> None:
-    """Upsert one exposure row per (form, item); accumulate candidate counts."""
+    """One exposure row per (form, item); candidate counts accumulate atomically.
+
+    Uses INSERT ... ON CONFLICT DO UPDATE (PostgreSQL and SQLite) so simultaneous starts by different candidates
+    neither collide on the unique key nor lose increments (a read-modify-write would do both)."""
     when = when or utcnow()
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
     for fi in form.items:
-        ev = db.scalar(select(ExposureEvent).where(ExposureEvent.form_id == form.id, ExposureEvent.question_id == fi.question_id,
-                                                   ExposureEvent.event_type == "administered"))
-        if ev:
-            ev.candidate_count += n_candidates
-            ev.occurred_at = max(ev.occurred_at, when)
-        else:
-            db.add(ExposureEvent(question_id=fi.question_id, slot_id=slot_id, form_id=form.id, event_type="administered",
-                                 candidate_count=n_candidates, occurred_at=when))
+        stmt = dialect_insert(ExposureEvent).values(question_id=fi.question_id, slot_id=slot_id, form_id=form.id,
+                                                    event_type="administered", candidate_count=n_candidates, occurred_at=when)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["form_id", "question_id", "event_type"],
+            set_={"candidate_count": ExposureEvent.candidate_count + stmt.excluded.candidate_count,
+                  "occurred_at": func.max(ExposureEvent.occurred_at, stmt.excluded.occurred_at)
+                  if dialect == "sqlite" else func.greatest(ExposureEvent.occurred_at, stmt.excluded.occurred_at)},
+        )
+        db.execute(stmt)
 
 
 def policy(db: Session, org_id: int) -> dict:

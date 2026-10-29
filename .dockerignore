@@ -1,0 +1,22 @@
+# Never send local state, secrets or build caches into the Docker build context.
+**/.env
+**/.env.*
+!.env.example
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+backend/var
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+.git
+.github
+.claude
+**/.DS_Store
+docs

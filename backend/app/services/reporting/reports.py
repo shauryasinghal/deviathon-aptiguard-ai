@@ -49,6 +49,7 @@ TEMPLATES = {
     "form_overlap": ("Test-form overlap", "Pairwise shared items, smaller-form % and Jaccard for the latest assembly."),
     "leak_investigations": ("Leak investigations", "Alerts, evidence class, signals, investigation status and decisions."),
     "validation_results": ("Validation results", "Automated quality-gate results for every item."),
+    "attempt_reviews": ("Attempt integrity reviews", "Attempts that included withdrawn questions: official vs alternative score and staff decisions."),
 }
 
 
@@ -195,6 +196,25 @@ def build(db: Session, org_id: int, kind: str, section: str | None = None, slot:
                              a.reviewer_decision, a.decided_at, inv.resolution if inv else None])
         rep.warnings.append("Text similarity and statistical signals are evidence, not proof of misconduct. Only the "
                             "supplied datasets were searched; no live internet or messaging platform was monitored.")
+
+    elif kind == "attempt_reviews":
+        from app.models import Attempt, Candidate, Slot, TestForm
+
+        rows = db.execute(select(Attempt, Candidate.code, TestForm.code).join(Candidate, Candidate.id == Attempt.candidate_id)
+                          .join(TestForm, TestForm.id == Attempt.form_id).join(Slot, Slot.id == TestForm.slot_id)
+                          .where(Slot.org_id == org_id, Attempt.review_flags.is_not(None)).order_by(Attempt.id)).all()
+        rep.columns = ["attempt", "candidate", "form", "status", "official_score", "official_max", "alternative_score",
+                       "alternative_max", "flagged_items", "decision", "decided_by", "decided_at", "reason"]
+        for a, cand, form in rows:
+            f = a.review_flags or {}
+            last = (f.get("resolutions") or [{}])[-1]
+            if status and f.get("decision", "pending") not in status.split(","):
+                continue
+            rep.rows.append([a.id, cand, form, a.status, a.score, a.max_score, f.get("score_excluding_flagged"),
+                             f.get("max_excluding_flagged"), " ".join(i["code"] for i in f.get("items", [])),
+                             f.get("decision", "pending"), (last.get("by") or {}).get("name"), last.get("at"), last.get("reason")])
+        rep.warnings.append("Official scores are never overwritten; decisions are recorded alongside them. Candidates are "
+                            "pseudonymous codes.")
 
     elif kind == "validation_results":
         stmt = select(ValidationResult, Question).join(Question, Question.id == ValidationResult.question_id).where(Question.org_id == org_id)

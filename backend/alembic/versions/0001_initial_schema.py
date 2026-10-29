@@ -553,8 +553,9 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['question_id'], ['questions.id'], name=op.f('fk_form_items_question_id_questions')),
     sa.ForeignKeyConstraint(['section_id'], ['sections.id'], name=op.f('fk_form_items_section_id_sections')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_form_items')),
-    sa.UniqueConstraint('form_id', 'position', name=op.f('uq_form_items_form_id')),
-    sa.UniqueConstraint('form_id', 'question_id', name=op.f('uq_form_items_form_id'))
+    # Corrected names: originally both were 'uq_form_items_form_id', which PostgreSQL rejects (SQLite tolerated it).
+    sa.UniqueConstraint('form_id', 'position', name='uq_form_items_form_id_position'),
+    sa.UniqueConstraint('form_id', 'question_id', name='uq_form_items_form_id_question_id')
     )
     with op.batch_alter_table('form_items', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_form_items_form_id'), ['form_id'], unique=False)

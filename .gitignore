@@ -39,3 +39,7 @@ frontend/playwright-report/
 .vscode/
 *.log
 frontend/blob-report/
+
+# Official datasets and validation outputs stay local (licensing/privacy)
+data/official/
+reports/

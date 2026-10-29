@@ -47,7 +47,8 @@ DEFAULT_POLICIES: dict[str, dict] = {
     "assessment": {
         "enforce_slot_window": True,     # candidates may only start inside their slot's window
         "early_entry_minutes": 15,
-        "late_entry_minutes": 30,        # after slot start; attempts still end at their own deadline
+        "late_entry_minutes": 30,        # after slot start
+        "deadline_mode": "full_duration",  # full_duration: start + duration | slot_end: also capped at slot end
     },
     "retention": {
         "response_retention_days": 365,
@@ -55,6 +56,9 @@ DEFAULT_POLICIES: dict[str, dict] = {
         "pseudonymize_candidates": True,
     },
 }
+
+
+ENUM_FIELDS = {"assessment": {"deadline_mode": ("full_duration", "slot_end")}}
 
 
 def get_policy(db: Session, org_id: int, key: str) -> dict:
@@ -75,6 +79,9 @@ def set_policy(db: Session, org_id: int, key: str, value: dict, user_id: int | N
     unknown = set(value) - set(DEFAULT_POLICIES[key])
     if unknown:
         raise ValueError(f"Unknown policy fields: {sorted(unknown)}")
+    for field, allowed in ENUM_FIELDS.get(key, {}).items():
+        if field in value and value[field] not in allowed:
+            raise ValueError(f"{key}.{field} must be one of {allowed}")
     row = db.scalar(select(Policy).where(Policy.org_id == org_id, Policy.key == key))
     current = get_policy(db, org_id, key)
     current.update(value)

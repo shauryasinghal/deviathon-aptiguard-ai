@@ -5,7 +5,14 @@ import tempfile
 from pathlib import Path
 
 _TMP = tempfile.mkdtemp(prefix="aptiguard-test-")
-os.environ["DATABASE_URL"] = f"sqlite:///{_TMP}/test.db"
+# Default: a throw-away SQLite file. Set TEST_DATABASE_URL to run the same suite against another engine
+# (e.g. PostgreSQL); the database name must end in "_test" because its schema is dropped and rebuilt.
+_TEST_URL = os.environ.get("TEST_DATABASE_URL")
+if _TEST_URL:
+    _dbname = _TEST_URL.rsplit("/", 1)[-1].split("?")[0]
+    if not _dbname.endswith("_test"):
+        raise SystemExit(f"TEST_DATABASE_URL database name must end with '_test' (got '{_dbname}'); refusing to wipe it")
+os.environ["DATABASE_URL"] = _TEST_URL or f"sqlite:///{_TMP}/test.db"
 os.environ["APP_ENV"] = "test"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["LLM_PROVIDER"] = "none"
@@ -24,6 +31,14 @@ def seeded():
     backend = Path(__file__).resolve().parents[1]
     cfg = Config(str(backend / "alembic.ini"))
     cfg.set_main_option("script_location", str(backend / "alembic"))
+    if _TEST_URL and _TEST_URL.startswith("postgresql"):
+        from sqlalchemy import create_engine, text
+
+        eng = create_engine(_TEST_URL)
+        with eng.begin() as c:  # disposable *_test database: start from an empty schema every session
+            c.execute(text("DROP SCHEMA public CASCADE"))
+            c.execute(text("CREATE SCHEMA public"))
+        eng.dispose()
     command.upgrade(cfg, "head")
     from app.db.session import SessionLocal
     from app.demo.seed import seed_demo

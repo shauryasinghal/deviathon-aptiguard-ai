@@ -17,7 +17,8 @@ type AuthCtx = {
   user: Me | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<Me>;
-  logout: () => void;
+  logout: () => void; // local only (used on 401)
+  signOut: () => Promise<void>; // revokes all server-side sessions, then clears locally
   can: (perm: string) => boolean;
 };
 
@@ -53,9 +54,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return r.user;
   }, []);
 
+  const signOut = useCallback(async () => {
+    try {
+      await api("/auth/logout", { method: "POST" });
+    } catch {
+      /* already expired/revoked or offline: local sign-out still proceeds */
+    }
+    logout();
+  }, [logout]);
+
   const value = useMemo<AuthCtx>(
-    () => ({ user, loading, login, logout, can: (p) => !!user?.permissions.includes(p) }),
-    [user, loading, login, logout],
+    () => ({ user, loading, login, logout, signOut, can: (p) => !!user?.permissions.includes(p) }),
+    [user, loading, login, logout, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

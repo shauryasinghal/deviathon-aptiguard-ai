@@ -104,6 +104,8 @@ export default function Assessment() {
         <h1 className="text-[20px] font-semibold">Assessment submitted</h1>
         <p className="text-sm text-fg-muted">Scored on the server. Answer keys are never sent to your browser.</p>
         <div className="text-[40px] font-semibold tabular">{r.score} / {r.max_score}</div>
+        {r.status_note && <p className="rounded-md border border-info/30 bg-info-soft px-3 py-2 text-[13px] text-info">{r.status_note}</p>}
+        {r.final && <p className="rounded-md border border-line bg-surface-2 px-3 py-2 text-[13px]">Final result: <b>{r.final.score ?? "—"} / {r.final.max_score ?? "—"}</b> — {r.final.basis}</p>}
         <div className="grid grid-cols-3 gap-2 text-[12.5px]">{Object.entries(r.section_scores).map(([k, v]: any) => (
           <div key={k} className="rounded-md border border-line p-2"><div className="text-fg-subtle">{k}</div><div className="font-semibold tabular">{v.score}/{v.max}</div><div className="text-fg-subtle">{v.answered} answered</div></div>))}</div>
         <Button asChild variant="primary"><Link to="/assessment">Back to my assessments</Link></Button>

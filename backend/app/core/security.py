@@ -64,16 +64,16 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int, role: str) -> tuple[str, datetime]:
+def create_access_token(user_id: int, role: str, token_version: int = 0) -> tuple[str, datetime]:
     s = get_settings()
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=s.jwt_expire_minutes)
     claims = {"sub": str(user_id), "role": role, "iat": now, "nbf": now, "exp": exp, "iss": "aptiguard",
-              "jti": uuid.uuid4().hex}
+              "jti": uuid.uuid4().hex, "tv": int(token_version)}
     token = jwt.encode(claims, s.jwt_secret, "HS256")
     return token, exp
 
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"], issuer="aptiguard",
-                      options={"require": ["exp", "iat", "sub", "iss"]})
+                      options={"require": ["exp", "iat", "sub", "iss", "tv"]})

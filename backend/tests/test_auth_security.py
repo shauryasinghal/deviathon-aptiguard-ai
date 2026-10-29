@@ -12,10 +12,16 @@ PW = get_settings().demo_password
 
 
 @pytest.fixture(autouse=True)
-def _clear_limiter():
-    login_limiter.reset()
+def _clear_limiter(seeded):
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as s:
+        login_limiter.reset(s)
+        s.commit()
     yield
-    login_limiter.reset()
+    with SessionLocal() as s:
+        login_limiter.reset(s)
+        s.commit()
 
 
 @pytest.mark.parametrize("email,role", [("admin", "admin"), ("designer", "designer"), ("reviewer", "reviewer"),
@@ -141,3 +147,19 @@ def test_unknown_app_env_is_rejected(env):
 def test_app_env_is_case_and_space_normalised_before_the_production_guard():
     with pytest.raises(ValueError, match="DEMO_MODE"):
         Settings(app_env=" Production ", demo_mode=True, jwt_secret="q" * 48)
+
+
+def test_configuration_errors_never_echo_secret_values(monkeypatch):
+    from app.core.config import ConfigurationError
+
+    secret = "S3CRET-should-never-appear-in-logs-0123456789"
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("JWT_SECRET", secret)
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ConfigurationError) as ei:
+            get_settings()
+        assert "DEMO_MODE must be false" in str(ei.value) and secret not in str(ei.value) and "S3CRET" not in str(ei.value)
+    finally:
+        get_settings.cache_clear()

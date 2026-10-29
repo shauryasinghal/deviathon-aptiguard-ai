@@ -1,42 +1,42 @@
-"""Small in-process sliding-window limiter for login failures (single-instance prototype).
+"""Login-failure limiter backed by the application database (table `auth_failures`).
 
-Multi-instance deployments need a shared store (e.g. Redis); documented in docs/security-review.md.
+Shared by every API process/container that uses the same database and survives restarts, without adding new
+infrastructure. Keys are SHA-256(client | email); raw emails are not stored. Rows older than the window are pruned.
 """
 from __future__ import annotations
 
-import threading
-import time
-from collections import defaultdict, deque
+import hashlib
+from datetime import timedelta
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
+
+from app.db.base import utcnow
+from app.models import AuthFailure
+
+
+def key_for(client: str, email: str) -> str:
+    return hashlib.sha256(f"{client}|{email}".encode()).hexdigest()
 
 
 class FailureLimiter:
-    def __init__(self) -> None:
-        self._events: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = threading.Lock()
+    def retry_after(self, db: Session, key: str, limit: int, window: int) -> int:
+        since = utcnow() - timedelta(seconds=window)
+        n, oldest = db.execute(select(func.count(), func.min(AuthFailure.created_at))
+                               .where(AuthFailure.key_hash == key, AuthFailure.created_at >= since)).one()
+        if n < limit or oldest is None:
+            return 0
+        return max(1, int(window - (utcnow() - oldest).total_seconds()) + 1)
 
-    def _prune(self, key: str, window: int, now: float) -> deque[float]:
-        q = self._events[key]
-        while q and now - q[0] > window:
-            q.popleft()
-        return q
+    def fail(self, db: Session, key: str, window: int) -> None:
+        db.execute(delete(AuthFailure).where(AuthFailure.created_at < utcnow() - timedelta(seconds=window)))
+        db.add(AuthFailure(key_hash=key))
 
-    def retry_after(self, key: str, limit: int, window: int) -> int:
-        """Seconds until another attempt is allowed (0 = allowed)."""
-        now = time.monotonic()
-        with self._lock:
-            q = self._prune(key, window, now)
-            return int(window - (now - q[0])) + 1 if len(q) >= limit else 0
-
-    def fail(self, key: str) -> None:
-        with self._lock:
-            self._events[key].append(time.monotonic())
-
-    def reset(self, key: str | None = None) -> None:
-        with self._lock:
-            if key is None:
-                self._events.clear()
-            else:
-                self._events.pop(key, None)
+    def reset(self, db: Session, key: str | None = None) -> None:
+        stmt = delete(AuthFailure)
+        if key is not None:
+            stmt = stmt.where(AuthFailure.key_hash == key)
+        db.execute(stmt)
 
 
 login_limiter = FailureLimiter()

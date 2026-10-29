@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1.serializers import user_label
@@ -186,7 +187,13 @@ def assign(form_id: int, body: AssignIn, user: User = Depends(require("assembly.
         if same_slot:
             skipped.append({"code": code, "reason": "already assigned to a form in this slot"})
             continue
-        db.add(CandidateAssignment(candidate_id=cand.id, form_id=f.id, assigned_by=user.id))
+        try:
+            with db.begin_nested():  # concurrent duplicate assignment -> skipped, never a 500
+                db.add(CandidateAssignment(candidate_id=cand.id, form_id=f.id, assigned_by=user.id))
+                db.flush()
+        except IntegrityError:
+            skipped.append({"code": code, "reason": "already assigned (concurrent request)"})
+            continue
         added.append(code)
     audit.record(db, user, "assembly.candidates_assigned", "test_form", f.code, f"Assigned {len(added)} candidate(s) to {f.code}",
                  {"added": added, "skipped": skipped})
@@ -205,3 +212,22 @@ def form_attempts(form_id: int, user: User = Depends(require("assembly.read")), 
     return [{"attempt_id": a.id, "candidate": code, "status": a.status, "started_at": a.started_at,
              "submitted_at": a.submitted_at, "score": a.score, "max_score": a.max_score, "review_flags": a.review_flags}
             for a, code in rows]
+
+
+@router.delete("/forms/{form_id}/assignments/{candidate_code}")
+def unassign(form_id: int, candidate_code: str, user: User = Depends(require("assembly.run")), db: Session = Depends(get_db)):
+    """Remove an assignment. Refused once the candidate has started (the attempt and its history are preserved)."""
+    f = db.get(TestForm, form_id)
+    if not f or f.slot.org_id != user.org_id:
+        raise NotFound("Form not found")
+    cand = db.scalar(select(Candidate).where(Candidate.org_id == user.org_id, Candidate.code == candidate_code))
+    asg = cand and db.scalar(select(CandidateAssignment).where(CandidateAssignment.candidate_id == cand.id,
+                                                                CandidateAssignment.form_id == f.id))
+    if not asg:
+        raise NotFound("Assignment not found")
+    if db.scalar(select(Attempt.id).where(Attempt.candidate_id == cand.id, Attempt.form_id == f.id)):
+        raise Conflict("The candidate has already started this assessment; the assignment cannot be removed")
+    db.delete(asg)
+    audit.record(db, user, "assembly.candidate_unassigned", "test_form", f.code, f"Removed {candidate_code} from {f.code}")
+    db.commit()
+    return {"removed": candidate_code}

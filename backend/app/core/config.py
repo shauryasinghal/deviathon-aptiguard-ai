@@ -82,6 +82,17 @@ class Settings(BaseSettings):
         return self.jwt_secret.startswith("dev-only")
 
 
+class ConfigurationError(RuntimeError):
+    pass
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    from pydantic import ValidationError
+
+    try:
+        return Settings()
+    except ValidationError as e:
+        # Report only the rule messages: pydantic's default text echoes input values (could include secrets).
+        msgs = "; ".join(str(err.get("msg", "invalid value")).removeprefix("Value error, ") for err in e.errors())
+        raise ConfigurationError(f"Invalid configuration: {msgs}") from None

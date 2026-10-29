@@ -28,4 +28,4 @@ from app.models.delivery import (  # noqa: F401
     Slot,
     TestForm,
 )
-from app.models.org import AuditEvent, Candidate, Organization, Permission, Policy, Role, User  # noqa: F401
+from app.models.org import AuditEvent, AuthFailure, Candidate, Organization, Permission, Policy, Role, User  # noqa: F401

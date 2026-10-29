@@ -25,15 +25,21 @@
 - **Item withdrawn while attempts exist** (quarantine, retirement or confirmed leak): new starts on affected forms are
   blocked; attempts already started continue and are scored normally (official score unchanged). Each affected attempt
   gets a staff-only review flag with an alternative score excluding the withdrawn item(s), and an audit event. The final
-  decision (accept official score, use the alternative, or offer a re-sit) is **not yet an in-app workflow** — flags are
-  visible via `GET /api/v1/assembly/forms/{id}/attempts` and as a count in the Assembler.
-- Attempts that start late in the slot window still receive their full duration (deadline = start + duration).
+  decision is made by a reviewer in **Reviewer Workspace → Flagged attempts** (retain original, use alternative, or arrange
+  reassessment, with a mandatory reason; recorded with reviewer and time, audited, history kept; new evidence reopens the
+  decision). A "reassessment" decision is recorded but the re-sit itself is arranged manually by assigning another form.
+- Late starts: by default an attempt gets its full duration (`deadline_mode=full_duration`); the policy
+  `deadline_mode=slot_end` caps the deadline at the slot's end. Which one applies is a human policy decision.
 - Answer saves are accepted up to 30 s after the deadline (network grace); later saves are rejected and the attempt is auto-submitted.
 - Login rate limiting is per client address + email: repeated failures can temporarily (5 min) lock out a known email.
 - No proctoring, identity verification, accommodations (extra time) or multilingual content.
 
 ## Engineering
-- Docker images, docker-compose and the GitHub Actions workflow are written but were **not executed** (Docker not
-  installed on the build machine; CI runs only after a push).
-- Rate limiting is in-process; tokens are not revocable (see security review).
-- SQLite is the tested database; PostgreSQL is supported by SQLAlchemy/Alembic but was not run in this environment.
+- **Docker**: images, `docker-compose.yml` (demo) and `docker-compose.prod.yml` (PostgreSQL, no demo) are written and
+  statically validated (Compose JSON schema; shell syntax), but **not executed locally** — Docker is not installed on the
+  build machine and installing it was out of scope. `scripts/docker_smoke.sh` runs them in GitHub Actions after a push.
+  The production start-up sequence (migrate → bootstrap → create admin → serve) was rehearsed outside containers on PostgreSQL.
+- **Linters**: `actionlint` and `hadolint` run only in CI (downloading their binaries locally was not permitted).
+- **PostgreSQL 17** is tested: the full backend suite, migrations from scratch, `alembic check`, a downgrade/upgrade
+  round-trip and a live multi-worker concurrency check all pass on a local throw-away cluster.
+- Tokens remain in `sessionStorage`; revocation is per user, not per device (see security review).

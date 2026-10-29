@@ -11,7 +11,7 @@ flowchart TB
   subgraph Backend [backend/app — FastAPI]
     Routers[api/v1/* — routing, permission checks, request validation]
     Services[services/* — domain logic, no HTTP]
-    Models[models/* — SQLAlchemy 2 ORM] --> Alembic[alembic/versions — 0001 schema, 0002 assignments, 0003 attempt review flags]
+    Models[models/* — SQLAlchemy 2 ORM] --> Alembic[alembic/versions — 0001 schema · 0002 assignments · 0003 attempt review flags · 0004 sessions, audit chain, login failures · 0005 cyclic FKs on PostgreSQL]
   end
   Pages --> Lib --> Routers --> Services --> Models
 ```
@@ -35,6 +35,7 @@ sequenceDiagram
   A->>API: import leak dataset → detect (text, MH drift, RT, BH-FDR)
   R->>API: investigate → confirm (item quarantined, forms flagged needs_review)
   Note over API: live attempts continue; staff-only review flag + alternative score; audit event
+  R->>API: resolve flagged attempt (retain / alternative / reassessment, reason required; history kept)
 ```
 
 ## Data model highlights

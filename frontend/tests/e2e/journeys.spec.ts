@@ -147,3 +147,56 @@ test.describe.serial("AptiGuard core journeys", () => {
     expect((await dl).suggestedFilename()).toMatch(/aptiguard-calibration-.*\.csv/);
   });
 });
+
+test.describe.serial("integrity journeys", () => {
+  test("7 · item quarantined during a live attempt → staff resolve the flag in the UI", async ({ page, request }) => {
+    const auth = async (email: string) => ({ Authorization: `Bearer ${await apiToken(request, email)}` });
+    const d = await auth("designer@aptiguard.demo");
+    const run = await (await request.post(`${API}/assembly/runs`, { headers: d, data: {
+      drive: "E2E Flag Drive", n_slots: 1, per_section: { QUANT: 3, LOGICAL: 3, VERBAL: 3 }, max_adjacent_overlap_pct: 0,
+      max_slot_exposures: 5, min_slot_spacing: 0, seed: 777 } })).json();
+    expect(run.status).toBe("succeeded");
+    await request.post(`${API}/assembly/runs/${run.id}/publish`, { headers: d });
+    const fid = run.forms[0].id;
+    await request.post(`${API}/assembly/forms/${fid}/assignments`, { headers: d, data: { candidate_codes: ["DEMO-CAND-02"] } });
+    const c = await auth("candidate2@aptiguard.demo");
+    const at = await (await request.post(`${API}/assessment/forms/${fid}/attempts`, { headers: c })).json();
+    const items = (await (await request.get(`${API}/assessment/forms/${fid}`, { headers: c })).json()).items;
+    await request.put(`${API}/assessment/attempts/${at.attempt_id}/responses`, { headers: c,
+      data: { answers: items.map((i: any) => ({ item_ref: i.item_ref, selected_key: "A" })) } });
+    const r = await auth("reviewer@aptiguard.demo");
+    const q = await request.post(`${API}/exposure/items/${run.forms[0].items[0].question_id}/quarantine`, { headers: r, data: { reason: "Exposed mid-slot (E2E)" } });
+    expect(q.ok()).toBeTruthy();
+    expect((await request.post(`${API}/assessment/attempts/${at.attempt_id}/submit`, { headers: c })).ok()).toBeTruthy();
+
+    await signIn(page, "reviewer");
+    await page.goto("/review?tab=flagged");
+    const card = page.locator("div.rounded-lg", { hasText: `Attempt #${at.attempt_id}` }).first();
+    await expect(card.getByText("Decision pending")).toBeVisible();
+    await expect(card.getByText("Exposed mid-slot (E2E)")).toBeVisible();
+    await card.getByLabel(/Use alternative score/).check();
+    await card.getByLabel(/Reason \(required/).fill("Question was exposed before this candidate's slot began.");
+    await card.getByRole("button", { name: "Record decision" }).click();
+    await expect(page.getByText(new RegExp(`Attempt #${at.attempt_id}: Use Alternative recorded`))).toBeVisible();
+    const flagged = await (await request.get(`${API}/integrity/flagged-attempts?state=resolved`, { headers: await auth("reviewer2@aptiguard.demo") })).json();
+    const me = flagged.items.find((x: any) => x.attempt_id === at.attempt_id);
+    expect(me.decision).toBe("use_alternative");
+    expect(me.official_score).not.toBeNull(); // official score kept
+  });
+
+  test("8 · an author cannot approve their own item (server-enforced, shown in UI)", async ({ page, request }) => {
+    const a = { Authorization: `Bearer ${await apiToken(request, "admin@aptiguard.demo")}` };
+    const created = await (await request.post(`${API}/questions`, { headers: a, data: {
+      section: "LOGICAL", skill: "patterns", concept: "Odd one out", difficulty_target: "easy",
+      stem: "Which of these numbers is not prime: 2, 3, 9, 11?", explanation: "9 = 3 × 3.",
+      options: [{ key: "A", text: "2", is_correct: false }, { key: "B", text: "3", is_correct: false },
+                { key: "C", text: "9", is_correct: true }, { key: "D", text: "11", is_correct: false }] } })).json();
+    await signIn(page, "admin");
+    await page.goto("/review");
+    await page.getByRole("button", { name: new RegExp(created.code) }).click();
+    await page.getByRole("button", { name: "Approve" }).click();
+    await expect(page.getByText(/Independent review required/)).toBeVisible();
+    const after = await (await request.get(`${API}/questions/${created.id}`, { headers: { Authorization: `Bearer ${await apiToken(request, "reviewer@aptiguard.demo")}` } })).json();
+    expect(after.status).toBe("pending_review");
+  });
+});

@@ -1,5 +1,5 @@
-# Local demo stack (synthetic data). For production set APP_ENV=production, DEMO_MODE=false, DEMO_SEED=false,
-# a strong JWT_SECRET, explicit CORS_ORIGINS and preferably DATABASE_URL pointing at PostgreSQL.
+# Local demo stack: SQLite + synthetic demo data (DEMO_SEED seeds only an empty database).
+# Production-like stack (PostgreSQL, no demo): see docker-compose.prod.yml.
 services:
   backend:
     build: { context: ., dockerfile: backend/Dockerfile }
@@ -10,10 +10,14 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret-change-me}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       DATABASE_URL: ${DATABASE_URL:-sqlite:////srv/backend/var/aptiguard.db}
+      FORWARDED_ALLOW_IPS: "*"   # only the frontend proxy can reach the backend on the compose network
     volumes: [ "aptiguard-data:/srv/backend/var" ]
+    restart: unless-stopped
+    stop_grace_period: 25s
   frontend:
     build: { context: ., dockerfile: frontend/Dockerfile }
-    ports: [ "8080:8080" ]
+    ports: [ "127.0.0.1:8080:8080" ]
     depends_on: { backend: { condition: service_healthy } }
+    restart: unless-stopped
 volumes:
   aptiguard-data:

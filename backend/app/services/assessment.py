@@ -46,6 +46,16 @@ def _attempt_view(db: Session, a: Attempt, include_answers: bool = True) -> dict
         out["answers"] = {str(refs[r.question_id]): r.selected_key for r in rs if r.question_id in refs}
     if a.status == "submitted":
         out["result"] = {"score": a.score, "max_score": a.max_score, "section_scores": a.section_scores}
+        flags = a.review_flags or {}
+        if flags.get("items"):
+            if flags.get("decision", "pending") == "pending":
+                out["result"]["status_note"] = "Your result is undergoing a routine integrity review. No action is needed from you."
+            else:
+                last = flags["resolutions"][-1]
+                out["result"]["final"] = {"score": last["final_score"], "max_score": last["final_max"],
+                                          "basis": {"retain_original": "original score confirmed",
+                                                    "use_alternative": "score adjusted: withdrawn question(s) excluded",
+                                                    "reassessment": "a reassessment will be arranged"}[last["decision"]]}
     return out
 
 
@@ -93,11 +103,16 @@ def start_attempt(db: Session, candidate: Candidate, form: TestForm) -> dict:
         raise Conflict("This assessment can only be started inside its slot window",
                        {"opens_at": w["opens_at"].isoformat(), "closes_at": w["closes_at"].isoformat(), "state": w["state"]})
     now = utcnow()
+    deadline = now + timedelta(minutes=form.duration_minutes)
+    if get_policy(db, form.slot.org_id, "assessment").get("deadline_mode") == "slot_end":
+        deadline = min(deadline, form.slot.ends_at)  # late starters do not run past the slot's end
     a = Attempt(candidate_id=candidate.id, form_id=form.id, slot_id=form.slot_id, status="in_progress", started_at=now,
-                deadline_at=now + timedelta(minutes=form.duration_minutes), is_synthetic=candidate.is_synthetic)
-    db.add(a)
+                deadline_at=deadline, is_synthetic=candidate.is_synthetic)
     try:
+        # add *inside* the savepoint: begin_nested() flushes pending objects before emitting SAVEPOINT, so an object
+        # added earlier would hit the unique constraint outside the savepoint and abort the whole transaction.
         with db.begin_nested():
+            db.add(a)
             db.flush()
     except IntegrityError:  # concurrent start by the same candidate: return the attempt that won
         existing = db.scalar(select(Attempt).where(Attempt.candidate_id == candidate.id, Attempt.form_id == form.id))
@@ -259,6 +274,9 @@ def flag_attempts_for_item(db: Session, question_id: int, reason: str, user=None
             continue
         flags["items"] = [*flags["items"], {"question_id": question_id, "code": q.code, "reason": reason[:300],
                                             "flagged_at": utcnow().isoformat(), "attempt_status_when_flagged": a.status}]
+        if flags.get("decision") not in (None, "pending"):  # new evidence reopens an earlier decision (history kept)
+            flags["decision"] = "pending"
+            flags["reopened_at"] = utcnow().isoformat()
         if a.status == "submitted":
             flags.update(_alternative_score(db, a, {i["question_id"] for i in flags["items"]}))
         a.review_flags = flags
@@ -277,3 +295,39 @@ def note_item_released(db: Session, question_id: int, user=None) -> None:
         if any(i["question_id"] == question_id and "released_at" not in i for i in items):
             a.review_flags = {**a.review_flags, "items": [{**i, "released_at": utcnow().isoformat()} if i["question_id"] == question_id else i
                                                           for i in items]}
+
+
+
+DECISIONS = ("retain_original", "use_alternative", "reassessment")
+
+
+def resolve_flagged_attempt(db: Session, attempt_id: int, decision: str, reason: str, user) -> Attempt:
+    """Explicit, audited disposition of a flagged attempt. The official score column is never overwritten; the
+    decision, reviewer, time, reason and resulting final score are appended to the attempt's review history."""
+    a = db.get(Attempt, attempt_id)
+    if not a or db.get(TestForm, a.form_id).slot.org_id != user.org_id:
+        raise NotFound("Attempt not found")
+    flags = a.review_flags or {}
+    if not flags.get("items"):
+        raise Conflict("This attempt has no integrity flag to resolve")
+    if a.status != "submitted":
+        raise Conflict("The attempt is still in progress; decide after it has been submitted")
+    if decision not in DECISIONS:
+        raise Unprocessable(f"decision must be one of {DECISIONS}")
+    if not reason or len(reason.strip()) < 10:
+        raise Unprocessable("A reason of at least 10 characters is required")
+    alt = _alternative_score(db, a, {i["question_id"] for i in flags["items"]})
+    if decision == "use_alternative" and alt["max_excluding_flagged"] <= 0:
+        raise Conflict("No alternative score is possible: every question was withdrawn; choose reassessment")
+    final = {"retain_original": (a.score, a.max_score),
+             "use_alternative": (alt["score_excluding_flagged"], alt["max_excluding_flagged"]),
+             "reassessment": (None, None)}[decision]
+    entry = {"decision": decision, "reason": reason.strip()[:1000], "by": {"id": user.id, "name": user.full_name},
+             "at": utcnow().isoformat(), "official_score": a.score, "official_max": a.max_score, **alt,
+             "final_score": final[0], "final_max": final[1],
+             "flagged_items": [i["code"] for i in flags["items"]]}
+    a.review_flags = {**flags, **alt, "decision": decision, "resolutions": [*flags.get("resolutions", []), entry]}
+    audit.record(db, user, "assessment.flag_resolved", "attempt", a.id,
+                 f"Attempt #{a.id}: {decision.replace('_', ' ')} ({reason.strip()[:120]})",
+                 {k: entry[k] for k in ("decision", "official_score", "final_score", "final_max", "flagged_items")})
+    return a

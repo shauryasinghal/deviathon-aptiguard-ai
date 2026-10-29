@@ -48,6 +48,8 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(200))
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Bumped on logout / admin revocation: every token carrying an older version is rejected (session revocation).
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     role: Mapped[Role] = relationship(lazy="joined")
@@ -89,7 +91,20 @@ class AuditEvent(Base):
     summary: Mapped[str] = mapped_column(String(400))
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    # Tamper-evidence: hash = sha256(prev_hash + canonical(event)); see services/audit.py.
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
-__all__ = ["Organization", "Permission", "Role", "User", "Candidate", "Policy", "AuditEvent", "role_permissions"]
+class AuthFailure(Base):
+    """Failed sign-in attempts, stored in the database so the limiter is shared by all API processes and survives
+    restarts. Only a SHA-256 of client+email is kept (no raw email)."""
+
+    __tablename__ = "auth_failures"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+__all__ = ["Organization", "Permission", "Role", "User", "Candidate", "Policy", "AuditEvent", "AuthFailure", "role_permissions"]
 _ = Integer  # keep import for alembic autogenerate type map

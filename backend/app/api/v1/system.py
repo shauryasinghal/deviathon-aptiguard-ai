@@ -127,6 +127,14 @@ def audit_log(action: str | None = None, entity_type: str | None = None, q: str 
                        "entity_id": e.entity_id, "summary": e.summary, "details": e.details} for e in rows]}
 
 
+@router.get("/audit/verify")
+def audit_verify(user: User = Depends(require("audit.read")), db: Session = Depends(get_db)):
+    """Recompute the audit hash chain and report the first tampered/missing event, if any."""
+    from app.services.audit import verify_chain
+
+    return verify_chain(db)
+
+
 @router.post("/system/demo/reset")
 def demo_reset(user: User = Depends(require("demo.reset")), db: Session = Depends(get_db)):
     if not get_settings().demo_mode:

@@ -11,8 +11,15 @@ V1 = "/api/v1"
 
 def test_health_and_readiness(client):
     assert client.get(f"{V1}/health").json()["status"] == "ok"
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    backend = Path(__file__).resolve().parents[1]
+    cfg = Config(str(backend / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend / "alembic"))
+    head = ScriptDirectory.from_config(cfg).get_current_head()
     r = client.get(f"{V1}/ready").json()
-    assert r["status"] == "ready" and r["migration"] == "0003"
+    assert r["status"] == "ready" and r["migration"] == head
 
 
 def test_login_rejects_bad_password(client):

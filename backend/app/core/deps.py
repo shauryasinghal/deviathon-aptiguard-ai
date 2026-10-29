@@ -25,9 +25,14 @@ def get_current_user(
         payload = decode_token(creds.credentials)
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token", {"WWW-Authenticate": "Bearer"})
-    user = db.get(User, int(payload["sub"]))
+    try:
+        user = db.get(User, int(payload["sub"]))
+    except (TypeError, ValueError):
+        user = None
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User inactive or not found")
+    if payload.get("tv") != (user.token_version or 0):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session has been revoked; please sign in again")
     return user
 
 

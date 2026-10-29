@@ -189,3 +189,88 @@ def validate_item_frame(df: pd.DataFrame) -> dict:
     if df["item_code"].duplicated().any():
         rep["errors"].append(f"{int(df['item_code'].duplicated().sum())} duplicate item_code(s)")
     return rep
+
+
+def import_item_bank(db: Session, org_id: int, user: User | None, df: pd.DataFrame, source_label: str,
+                     status: str = "pending_review", is_synthetic: bool = False) -> dict:
+    """Import an item bank. Each row is validated (schema, single key, distinct options, duplicates); rows that
+    fail critical checks are rejected with reasons and never stored. Optional columns: difficulty, skill, concept,
+    family_code, parent_code (variant of), explanation. `status` defaults to pending_review (human approval)."""
+    from app.models import AnswerOption, Section, VariantFamily
+    from app.services.generation.base import GeneratedItem
+    from app.services.generation.registry import DIFFICULTY_B
+    from app.services.questions import add_revision, bank_entries, persist_checks
+    from app.services.textsim import item_fulltext, normalize, text_hash
+    from app.services.validation.validator import BankEntry, validate
+
+    if status not in ("pending_review", "approved"):
+        raise Unprocessable("status must be pending_review or approved")
+    rep = validate_item_frame(df)
+    if rep["errors"]:
+        raise Unprocessable("Item bank failed validation", rep)
+    sections = {s.code: s for s in db.scalars(select(Section)).all()}
+    existing = set(db.scalars(select(Question.code)).all())
+    bank = bank_entries(db, org_id)
+    families: dict[str, VariantFamily] = {f.code: f for f in db.scalars(select(VariantFamily).where(VariantFamily.org_id == org_id)).all()}
+    imported, rejected, held = [], [], []
+    rows = df.to_dict("records")
+    rows.sort(key=lambda r: bool(str(r.get("parent_code") or "").strip()))  # sources before their variants
+    code_to_q: dict[str, Question] = {}
+    for r in rows:
+        code = str(r["item_code"]).strip()
+        if code in existing:
+            rejected.append({"item_code": code, "reasons": ["item_code already exists"]})
+            continue
+        sec = str(r["section"]).strip().upper()
+        diff = str(r.get("difficulty") or "medium").strip().lower()
+        if diff not in DIFFICULTY_B:
+            rejected.append({"item_code": code, "reasons": [f"unknown difficulty '{diff}'"]})
+            continue
+        key = str(r["correct_option"]).strip().upper()
+        opts = [{"key": k, "text": str(r[f"option_{k.lower()}"]).strip(), "is_correct": k == key, "rationale": None} for k in "ABCD"]
+        item = GeneratedItem(sec, "", str(r.get("concept") or r.get("skill") or sec.title()), str(r.get("skill") or "unspecified"),
+                             diff, str(r["stem"]).strip(), opts, str(r.get("explanation") or "").strip() or "Explanation not supplied.", {})
+        status_v, checks = validate(item, bank, "imported")
+        crit = [c for c in checks if c.status == "fail" and c.severity == "critical"]
+        dup = [c for c in crit if c.check.startswith("duplicate")]
+        structural = [c.message for c in crit if not c.check.startswith("duplicate")]
+        if structural:
+            rejected.append({"item_code": code, "reasons": structural})
+            continue
+        # An existing bank's items were administered: never drop them for being similar. Import, but hold them out of
+        # assembly (pending_review) until a human resolves the duplication.
+        item_status, item_reason = status, None
+        if dup:
+            item_status, item_reason = "pending_review", "Imported but held for review: " + "; ".join(c.message for c in dup)[:280]
+            held.append({"item_code": code, "reasons": [c.message for c in dup]})
+        fam_code = str(r.get("family_code") or "").strip() or f"FAM-{code}"
+        fam = families.get(fam_code)
+        if fam is None:
+            fam = VariantFamily(code=fam_code, org_id=org_id, section_id=sections[sec].id, concept=item.concept, skill=item.skill)
+            db.add(fam)
+            db.flush()
+            families[fam_code] = fam
+        parent_code = str(r.get("parent_code") or "").strip()
+        parent = code_to_q.get(parent_code) or (db.scalar(select(Question).where(Question.code == parent_code)) if parent_code else None)
+        q = Question(code=code, org_id=org_id, section_id=sections[sec].id, family_id=fam.id, parent_id=parent.id if parent else None,
+                     is_source=parent is None, skill=item.skill, tags=[], stem=item.stem, explanation=item.explanation,
+                     difficulty_target=diff, difficulty_target_b=DIFFICULTY_B[diff], status=item_status, status_reason=item_reason,
+                     generation_method="imported",
+                     normalized_hash=text_hash(item_fulltext(item.stem, [o["text"] for o in opts])), validation_status=status_v,
+                     data_source=f"imported:{source_label}"[:60], is_synthetic=is_synthetic, created_by=user.id if user else None)
+        q.options = [AnswerOption(key=o["key"], text=o["text"], is_correct=o["is_correct"], position=i) for i, o in enumerate(opts)]
+        db.add(q)
+        db.flush()
+        if fam.source_question_id is None and parent is None:
+            fam.source_question_id = q.id
+        persist_checks(db, q, checks)
+        add_revision(db, q, "created", user, f"Imported from {source_label}")
+        bank.append(BankEntry(q.id, code, normalize(item_fulltext(q.stem, [o["text"] for o in opts])), q.normalized_hash, None, None))
+        code_to_q[code] = q
+        existing.add(code)
+        imported.append(code)
+    audit.record(db, user, "questions.bank_imported", "dataset", source_label,
+                 f"Item bank '{source_label}': {len(imported)} imported ({len(held)} held for duplicate review), {len(rejected)} rejected",
+                 {"rejected": rejected[:50], "held": held[:50]}, org_id=org_id)
+    return {"rows": len(rows), "imported": len(imported), "held_for_duplicate_review": len(held), "rejected": len(rejected),
+            "rejections": rejected, "held": held}

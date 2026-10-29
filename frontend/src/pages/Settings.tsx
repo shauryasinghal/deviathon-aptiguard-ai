@@ -88,9 +88,14 @@ function Audit() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const a = useQuery({ queryKey: ["audit", q, page], queryFn: () => api<any>(`/audit${qs({ q, page, page_size: 50 })}`) });
+  const verify = useQuery({ queryKey: ["audit-verify"], queryFn: () => api<any>("/audit/verify"), enabled: false });
   return (
     <Card>
-      <FilterBar><Input aria-label="Search audit" placeholder="Search summary or actor…" className="w-72" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></FilterBar>
+      <FilterBar><Input aria-label="Search audit" placeholder="Search summary or actor…" className="w-72" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+        <Button size="sm" variant="outline" className="ml-auto" loading={verify.isFetching} onClick={() => verify.refetch()}>Verify integrity</Button>
+        {verify.data && <span role="status" className={verify.data.ok ? "text-[12.5px] text-ok" : "text-[12.5px] text-danger"}>
+          {verify.data.ok ? `Hash chain intact · ${verify.data.checked} events` : `Chain broken at event #${verify.data.broken_at_id} (${verify.data.reason})`}</span>}
+      </FilterBar>
       {a.isError ? <ErrorState error={a.error} /> : a.isLoading ? <LoadingRows /> : (
         <Table><THead><tr><Th>When</Th><Th>Actor</Th><Th>Action</Th><Th>Entity</Th><Th>Summary</Th></tr></THead>
           <tbody>{a.data.items.map((e: any) => <Tr key={e.id}><Td className="whitespace-nowrap text-[12px]">{fmtDate(e.at)}</Td><Td className="text-[12.5px]">{e.actor}</Td>

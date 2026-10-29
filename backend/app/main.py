@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.v1 import assembly, assessment, auth, calibration, dashboard, exposure, leaks, questions, reports, system, variants
+from app.api.v1 import assembly, assessment, auth, calibration, dashboard, exposure, integrity, leaks, questions, reports, system, variants
 from app.core.config import APP_VERSION, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
@@ -62,6 +62,6 @@ async def request_context(request: Request, call_next):
 
 
 api = APIRouter(prefix="/api/v1")
-for r in (system, auth, dashboard, questions, variants, calibration, exposure, leaks, assembly, assessment, reports):
+for r in (system, auth, dashboard, questions, variants, calibration, exposure, leaks, assembly, assessment, integrity, reports):
     api.include_router(r.router)
 app.include_router(api)

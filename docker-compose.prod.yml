@@ -1,0 +1,25 @@
+# Overlay for a production-like stack:  JWT_SECRET=... POSTGRES_PASSWORD=... \
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# No demo mode, no demo seed, PostgreSQL storage. Create the first admin with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend python /srv/scripts/create_admin.py
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: aptiguard
+      POSTGRES_USER: aptiguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [ "aptiguard-pg:/var/lib/postgresql/data" ]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U aptiguard -d aptiguard"], interval: 5s, timeout: 3s, retries: 20 }
+    restart: unless-stopped
+  backend:
+    environment:
+      APP_ENV: production
+      DEMO_MODE: "false"
+      DEMO_SEED: "false"
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 random characters)}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      DATABASE_URL: postgresql+psycopg://aptiguard:${POSTGRES_PASSWORD}@db:5432/aptiguard
+    depends_on: { db: { condition: service_healthy } }
+volumes:
+  aptiguard-pg:

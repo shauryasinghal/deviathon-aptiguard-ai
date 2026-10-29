@@ -59,7 +59,9 @@ class TestForm(TimestampMixin, Base):
 
 class FormItem(Base):
     __tablename__ = "form_items"
-    __table_args__ = (UniqueConstraint("form_id", "question_id"), UniqueConstraint("form_id", "position"))
+    # explicit names: the default convention uses only the first column, which would collide (PostgreSQL rejects that)
+    __table_args__ = (UniqueConstraint("form_id", "question_id", name="uq_form_items_form_id_question_id"),
+                      UniqueConstraint("form_id", "position", name="uq_form_items_form_id_position"))
     id: Mapped[int] = mapped_column(primary_key=True)
     form_id: Mapped[int] = mapped_column(ForeignKey("test_forms.id", ondelete="CASCADE"), index=True)
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"), index=True)

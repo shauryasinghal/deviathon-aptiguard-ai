@@ -123,7 +123,7 @@ function Breadcrumbs() {
 }
 
 export function UserMenu() {
-  const { user, logout } = useAuth();
+  const { user, signOut } = useAuth();
   const nav = useNavigate();
   if (!user) return null;
   const initials = user.name.split(" ").filter((w) => /^[A-Z]/.test(w)).map((w) => w[0]).slice(0, 2).join("");
@@ -142,7 +142,7 @@ export function UserMenu() {
         <MenuLabel>{user.email}</MenuLabel>
         <MenuItem onSelect={() => nav(user.role === "candidate" ? "/assessment" : "/settings")}><UserRound />{user.role_label}</MenuItem>
         <MenuSeparator />
-        <MenuItem onSelect={() => { nav("/login", { replace: true }); logout(); }} danger><LogOut />Sign out</MenuItem>
+        <MenuItem onSelect={async () => { await signOut(); nav("/login", { replace: true }); }} danger><LogOut />Sign out</MenuItem>
       </MenuContent>
     </Menu>
   );

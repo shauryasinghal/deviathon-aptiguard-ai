@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, RefreshCw, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { FlaggedAttempts } from "@/features/FlaggedAttempts";
 import { ItemCard, ValidationList } from "@/features/questions";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/overlay";
-import { EmptyState, ErrorState, LoadingRows, PageHeader } from "@/components/ui/page";
+import { EmptyState, ErrorState, LoadingRows, PageHeader, Segmented } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, Input, Label, Mono, Textarea } from "@/components/ui/primitives";
 import { StatusBadge } from "@/components/ui/status";
 import { api, ApiError } from "@/lib/api";
@@ -13,6 +15,8 @@ import { useAuth } from "@/lib/auth";
 import { cn, fmtDate, timeAgo, titleCase } from "@/lib/utils";
 
 export default function Review() {
+  const [params, setParams] = useSearchParams();
+  const view = (params.get("tab") === "flagged" ? "flagged" : "items") as "items" | "flagged";
   const { can } = useAuth();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["review-queue"], queryFn: () => api<any>("/review/queue") });
@@ -36,6 +40,9 @@ export default function Review() {
     <div>
       <PageHeader eyebrow="Content" title="Reviewer workspace"
         description="Compare each generated variant with its source, verify the key, edit if needed, then approve or reject. Authors cannot approve their own items." />
+      <div className="mb-5"><Segmented ariaLabel="Review area" value={view} onChange={(v) => setParams(v === "items" ? {} : { tab: v })}
+        options={[{ value: "items", label: "Item review" }, { value: "flagged", label: "Flagged attempts" }]} /></div>
+      {view === "flagged" ? <FlaggedAttempts /> : (<>
       {q.isError ? <Card><ErrorState error={q.error} onRetry={() => q.refetch()} /></Card> : q.isLoading ? <Card><LoadingRows /></Card> : !items.length ? (
         <Card><EmptyState title="Review queue is empty" description="Generate variants in the Variant Studio to add items." /></Card>
       ) : (
@@ -95,6 +102,7 @@ export default function Review() {
               <span className="text-fg-muted">{d.by?.name}</span><span className="ml-auto text-fg-subtle">{fmtDate(d.at)}</span></li>))}</ul>
         </Card>
       )}
+      </>)}
     </div>
   );
 }
