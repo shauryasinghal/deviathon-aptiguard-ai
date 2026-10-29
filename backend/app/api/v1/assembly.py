@@ -15,7 +15,7 @@ from app.db.session import get_db
 from app.models import AssemblyRun, Attempt, Candidate, CandidateAssignment, Question, TestForm, User
 from app.services import audit
 from app.services.assembly.algorithm import AssemblyConfig, preflight
-from app.services.assembly.service import DEFAULT_MIX, build_pool, preview, publish_checked, run_assembly
+from app.services.assembly.service import DEFAULT_MIX, build_pool, preview, publish_checked, run_assembly, run_comparability
 from app.services.exposure.service import exposure_stats
 
 router = APIRouter(prefix="/assembly", tags=["test assembly"])
@@ -72,6 +72,7 @@ def _run_dict(db: Session, r: AssemblyRun, with_forms: bool = False) -> dict:
     d["published"] = sum(1 for f in forms if f.status == "published")
     if with_forms:
         d["forms"] = [_form_dict(db, f, manifest=True) for f in forms]
+        d["comparability"] = run_comparability(db, r.org_id, forms)
     return d
 
 

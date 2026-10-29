@@ -75,10 +75,18 @@ def record(
     return ev
 
 
-def verify_chain(db: Session, limit: int | None = None) -> dict:
-    """Walk the chain in id order. Returns the first broken event, if any."""
+def verify_chain(db: Session, limit: int | None = None, anchor_count: int | None = None,
+                 anchor_head: str | None = None) -> dict:
+    """Walk the chain in id order. Returns the first broken event, if any.
+
+    Optional external anchor: an operator who recorded `head` and `checked` from an earlier verification in storage the
+    database administrator cannot rewrite can pass them back as anchor_head/anchor_count. Then deleting the newest
+    events (which the chain alone cannot reveal) or rewriting the history that the anchor covers is detected too.
+    Without such an anchor a party able to recompute every hash can still rewrite the whole chain undetected.
+    """
     prev = GENESIS
     n = 0
+    anchored = anchor_count is None
     stmt = select(AuditEvent).order_by(AuditEvent.id)
     for ev in db.scalars(stmt).yield_per(1000):
         if ev.hash is None:  # rows written before migration 0004 were back-filled; None means an untracked insert
@@ -90,6 +98,12 @@ def verify_chain(db: Session, limit: int | None = None) -> dict:
                     "reason": "prev_hash mismatch" if ev.prev_hash != prev else "content hash mismatch"}
         prev = ev.hash
         n += 1
+        if anchor_count is not None and n == anchor_count:
+            if ev.hash != anchor_head:
+                return {"ok": False, "checked": n, "broken_at_id": ev.id, "reason": "anchor mismatch (history rewritten)"}
+            anchored = True
         if limit and n >= limit:
             break
-    return {"ok": True, "checked": n, "head": prev}
+    if not anchored:
+        return {"ok": False, "checked": n, "reason": f"chain is shorter than the anchor ({n} < {anchor_count}): events were removed"}
+    return {"ok": True, "checked": n, "head": prev, "anchor_verified": anchor_count is not None}

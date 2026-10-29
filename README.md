@@ -113,7 +113,11 @@ means the code exists and is covered by tests in this repository, not that it ha
 | Multiple-testing correction | Benjamini–Hochberg FDR | Implemented |
 | Attempt integrity review | Flag attempts affected by withdrawn items; staff resolution with reason | Implemented |
 | Role-based permissions | 5 roles, 19 server-checked permissions | Implemented |
-| Audit log with hash chain | Append-only SHA-256 chain with verify endpoint | Implemented — tamper-*evident*, not tamper-proof |
+| Audit log with hash chain | Append-only SHA-256 chain with verify endpoint; optional external anchor (`anchor_count` + `anchor_head`) detects removal of the newest events | Implemented — tamper-*evident*, not tamper-proof |
+| Server-observed item timing | Response times come from server-clock `focus` events, never from client-reported durations | Implemented — measures time on screen, not attention |
+| Expired-attempt finalisation | Background sweep + `scripts/finalize_expired.py`; idempotent and race-safe | Implemented |
+| Form comparability summary | Advisory mean-difficulty comparison of forms from Rasch estimates, with uncertainty | Implemented — advisory only; not an equivalence guarantee |
+| Retention / pseudonymisation / second-look policies | Stored in Settings | **Not enforced** — shown as such in the UI and read-only |
 | Reports (CSV / JSON / PDF) | Downloadable reports with filters | Implemented |
 | Dashboard, global search, notifications | Command-center KPIs, `/search`, `/notifications` | Implemented |
 | Candidate delivery | Assigned forms, atomic submit, server-side scoring | Implemented |
@@ -145,7 +149,7 @@ flowchart LR
     API --> AUD["audit hash chain"]
   end
   GEN -. "optional, off by default" .-> LLM["Anthropic API"]
-  GEN & VAL & CAL & EXP & ASM & LEAK & INT & REP & AUD --> DB[("SQLite default<br/>PostgreSQL supported<br/>Alembic 0001–0005")]
+  GEN & VAL & CAL & EXP & ASM & LEAK & INT & REP & AUD --> DB[("SQLite default<br/>PostgreSQL supported<br/>Alembic 0001–0007")]
 ```
 
 The backend is a single FastAPI application. Routers in `backend/app/api/v1/` handle routing, permission checks and
@@ -268,7 +272,7 @@ is possible, and the demo password is public by design.
 | Backend | Python 3.11+, FastAPI 0.162, Uvicorn 0.54, Pydantic 2.14 | REST API ([backend/requirements.txt](backend/requirements.txt)) |
 | Auth | PyJWT 2.15, bcrypt 4.2 | Tokens and password hashing |
 | Database | SQLite (default), PostgreSQL via psycopg 3.2 | Persistence; SQLAlchemy 2.0.36 ORM |
-| Migrations | Alembic 1.14 (revisions 0001–0005) | Schema management |
+| Migrations | Alembic 1.14 (revisions 0001–0007) | Schema management |
 | Analytics | NumPy 2.1, SciPy 1.14, pandas 2.2, scikit-learn 1.6 | Statistics and text similarity |
 | Reporting | ReportLab 4.2 | PDF export |
 | Optional AI | `anthropic` (via [requirements-llm.txt](backend/requirements-llm.txt)) | Optional variant generation |
@@ -375,6 +379,7 @@ Copy [.env.example](.env.example) to `.env` (git-ignored) and adjust. Use placeh
 | `DEMO_PASSWORD` | Password for seeded synthetic accounts | No | `<demo-password>` |
 | `LOGIN_MAX_FAILURES` / `LOGIN_WINDOW_SECONDS` | Login rate limit | No | `8` / `300` |
 | `MAX_UPLOAD_MB` / `MAX_REQUEST_MB` | Upload and request size caps | No | `10` / `12` |
+| `EXPIRY_SWEEP_SECONDS` | Interval of the in-process sweep that finalises expired attempts; `0` disables it (then run `scripts/finalize_expired.py` from cron) | No | `60` |
 | `DEMO_SEED` | Docker only: seed demo data into an *empty* database at start | No | `false` |
 | `FORWARDED_ALLOW_IPS` | Trusted proxies for `X-Forwarded-For` | No | `127.0.0.1` |
 | `LLM_PROVIDER` | `none` or `anthropic` (optional generation) | No | `none` |
@@ -429,7 +434,7 @@ http://127.0.0.1:8000/api/docs after starting the API. This table is representat
 │   │   ├── services/       # generation, validation, calibration, exposure, assembly, leakage, reporting, audit
 │   │   ├── demo/seed.py    # deterministic synthetic seed (seed 107)
 │   │   └── main.py
-│   ├── alembic/versions/   # migrations 0001–0005
+│   ├── alembic/versions/   # migrations 0001–0007
 │   └── tests/              # pytest suite (10 modules)
 ├── frontend/
 │   ├── src/                # pages, components, lib (api client, auth)

@@ -23,14 +23,13 @@ export default function Assessment() {
   const [remaining, setRemaining] = useState(0);
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const shownAt = useRef(Date.now());
-  const unsaved = useRef<Map<number, { item_ref: number; selected_key: string; time_spent_ms?: number }>>(new Map());
+  const unsaved = useRef<Map<number, { item_ref: number; selected_key: string }>>(new Map());
 
   // Persist every unsaved answer in one request; failures stay queued and are retried on the next save / submit.
   const flush = useCallback(async (attemptId: number) => {
     if (!unsaved.current.size) return true;
     // Take the entries out of the queue *before* sending, so overlapping saves never send the same entry twice
-    // (the server adds time_spent_ms, so a duplicate send would inflate response-time data).
+    // (never send the same answer twice).
     const batch = [...unsaved.current.values()];
     batch.forEach((b) => unsaved.current.delete(b.item_ref));
     setSaving("saving");
@@ -49,7 +48,7 @@ export default function Assessment() {
 
   const start = useMutation({
     mutationFn: () => api<any>(`/assessment/forms/${formId}/attempts`, { method: "POST" }),
-    onSuccess: (a) => { setAttempt(a); setAnswers(a.answers ?? {}); setRemaining(a.remaining_seconds); setStarted(true); shownAt.current = Date.now(); },
+    onSuccess: (a) => { setAttempt(a); setAnswers(a.answers ?? {}); setRemaining(a.remaining_seconds); setStarted(true); },
     onError: (e: ApiError) => toast.error(e.message),
   });
   const submit = useMutation({
@@ -72,10 +71,16 @@ export default function Assessment() {
   const choose = useCallback(async (key: string) => {
     if (!item || attempt?.status !== "in_progress") return;
     setAnswers((a) => ({ ...a, [item.item_ref]: key }));
-    unsaved.current.set(item.item_ref, { item_ref: item.item_ref, selected_key: key, time_spent_ms: Date.now() - shownAt.current });
-    shownAt.current = Date.now();
+    unsaved.current.set(item.item_ref, { item_ref: item.item_ref, selected_key: key });
     await flush(attempt.attempt_id);
   }, [item, attempt, flush]);
+
+  // Tell the server which item is on screen. The *server* clock measures the interval (client durations are never sent
+  // or trusted); repeats after a refresh or retry are harmless no-ops, and failures only blur the timing, never the answers.
+  useEffect(() => {
+    if (!started || attempt?.status !== "in_progress" || !item) return;
+    api(`/assessment/attempts/${attempt.attempt_id}/focus`, { method: "POST", body: { item_ref: item.item_ref } }).catch(() => {});
+  }, [started, attempt?.status, attempt?.attempt_id, item?.item_ref]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -153,8 +158,8 @@ export default function Assessment() {
                   <span className={cn("grid size-6 shrink-0 place-items-center rounded-md font-mono text-[12px] font-semibold", sel ? "bg-accent-strong text-white" : "bg-surface-3 text-fg-muted")}>{o.key}</span>{o.text}</button>); })}
             </div>
             <div className="flex justify-between">
-              <Button variant="outline" disabled={idx === 0} onClick={() => { setIdx(idx - 1); shownAt.current = Date.now(); }}><ChevronLeft />Previous</Button>
-              <Button variant="outline" disabled={idx === items.length - 1} onClick={() => { setIdx(idx + 1); shownAt.current = Date.now(); }}>Next<ChevronRight /></Button>
+              <Button variant="outline" disabled={idx === 0} onClick={() => { setIdx(idx - 1); }}><ChevronLeft />Previous</Button>
+              <Button variant="outline" disabled={idx === items.length - 1} onClick={() => { setIdx(idx + 1); }}>Next<ChevronRight /></Button>
             </div>
           </CardBody>}
         </Card>
@@ -162,7 +167,7 @@ export default function Assessment() {
           <div className="mb-3 text-[12.5px] text-fg-muted">{answered} of {items.length} answered</div>
           <div className="grid grid-cols-6 gap-1.5" aria-label="Question navigator">
             {items.map((it: any, i: number) => (
-              <button key={it.item_ref} onClick={() => { setIdx(i); shownAt.current = Date.now(); }} aria-label={`Question ${i + 1}${answers[it.item_ref] ? ", answered" : ""}${flags.has(i) ? ", flagged" : ""}`}
+              <button key={it.item_ref} onClick={() => { setIdx(i); }} aria-label={`Question ${i + 1}${answers[it.item_ref] ? ", answered" : ""}${flags.has(i) ? ", flagged" : ""}`}
                 className={cn("relative h-8 rounded-md border text-[12px] tabular", i === idx ? "border-accent text-fg" : "border-line", answers[it.item_ref] ? "bg-accent-soft text-accent" : "bg-surface-2 text-fg-muted")}>
                 {i + 1}{flags.has(i) && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-warn" />}</button>))}
           </div>

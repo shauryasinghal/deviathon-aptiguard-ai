@@ -16,6 +16,7 @@ os.environ["DATABASE_URL"] = _TEST_URL or f"sqlite:///{_TMP}/test.db"
 os.environ["APP_ENV"] = "test"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["LLM_PROVIDER"] = "none"
+os.environ["EXPIRY_SWEEP_SECONDS"] = "0"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest  # noqa: E402

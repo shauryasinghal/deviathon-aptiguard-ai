@@ -107,6 +107,21 @@ export default function Assembler() {
                     {r.diagnostics.failure && <div>Bottleneck: {titleCase(r.diagnostics.failure.bottleneck)} · eliminated: {JSON.stringify(r.diagnostics.failure.eliminated_by)}</div>}
                   </div>
                 )}
+                {r.status === "succeeded" && r.comparability && (
+                  <div className="rounded-md border border-line bg-surface-2 px-3 py-2 text-[12.5px]" role="note" aria-label="Form comparability">
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <b>Form comparability (advisory)</b>
+                      <Badge tone={r.comparability.status === "within_configured_margin" ? "ok" : r.comparability.status === "exceeds_configured_margin" ? "danger" : "warn"}>
+                        {titleCase(r.comparability.status)}
+                      </Badge>
+                    </div>
+                    <p className="text-fg-muted">{r.comparability.message}</p>
+                    {r.comparability.largest_pairwise_difference && (
+                      <p className="mt-1 text-fg-muted">Largest mean-difficulty gap: {r.comparability.largest_pairwise_difference.diff} logits
+                        (90% interval {r.comparability.largest_pairwise_difference.ci90.join(" to ")}) between {r.comparability.largest_pairwise_difference.forms.join(" and ")};
+                        configured margin ±{r.comparability.margin_logits}.</p>)}
+                    <p className="mt-1 text-fg-subtle">{r.comparability.caveat} Equal easy/medium/hard counts are enforced, but that alone is not psychometric equivalence.</p>
+                  </div>)}
                 {r.status === "succeeded" && <div className="flex gap-2">
                   {can("assembly.run") && <Button size="sm" variant="primary" disabled={!forms.some((f: any) => f.status === "draft")} loading={publish.isPending} onClick={() => publish.mutate()}><Rocket />{forms.some((f: any) => f.status === "draft") ? "Publish draft forms" : "No draft forms"}</Button>}
                   {r.needs_review > 0 && <Badge tone="warn">{r.needs_review} form(s) need reassessment</Badge>}

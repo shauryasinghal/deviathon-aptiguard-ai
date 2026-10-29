@@ -60,9 +60,10 @@ class Candidate(TimestampMixin, Base):
     """Pseudonymous candidate record. No contact details or government identifiers are stored."""
 
     __tablename__ = "candidates"
+    __table_args__ = (UniqueConstraint("org_id", "code", name="uq_candidates_org_code"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
-    code: Mapped[str] = mapped_column(String(40), unique=True)
+    code: Mapped[str] = mapped_column(String(40))
     display_name: Mapped[str] = mapped_column(String(80))
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), unique=True, nullable=True)
     is_synthetic: Mapped[bool] = mapped_column(Boolean, default=True)

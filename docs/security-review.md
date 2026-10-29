@@ -43,3 +43,34 @@ This is a manual review plus automated tests and dependency audits. **It does no
 7. **Proctoring/anti-cheating** (browser lockdown, identity verification) is out of scope.
 8. **CSP** is only set by the nginx container config, not by the Vite dev server.
 9. Leak detection searches **only imported datasets**; it does not and cannot monitor messaging platforms.
+
+## Update: findings fixed in hardening round 2
+| Finding | Severity | Fix | Evidence |
+|---|---|---|---|
+| `/review/queue` `recent_decisions` was not organisation-scoped (reviewer names, comments, item codes of other tenants) | High (cross-tenant disclosure) | Join through `Question.org_id` | `test_review_queue_recent_decisions_are_org_scoped` |
+| Response import matched forms/attempts across organisations; slot/form/candidate code collisions raised HTTP 500 | High / Medium | Org-scoped lookups; 422 for codes owned by another organisation; per-organisation candidate and slot uniqueness (migration 0007) | `test_import_*`, `test_tenants_may_reuse_*` |
+| Item-bank import resolved `parent_code` across organisations | Low — the importer has no HTTP route; only the offline `scripts/validate_official_data.py` calls it, on its own database | Org-scoped lookup | `test_p11_item_import_parent_code_is_org_scoped` |
+| Slot creation matched a same-named drive of another organisation | High | `_ensure_slots` scoped by organisation | `test_assembly_does_not_reuse_another_tenants_slots` |
+| Response times were taken from the browser | Medium (integrity of leak evidence) | Server-observed `focus` events | `tests/test_timing_and_expiry.py` |
+| Expired attempts stayed `in_progress` until the candidate returned | Medium | Idempotent sweep + script | `tests/test_timing_and_expiry.py` |
+| Settings UI called the audit trail "immutable" and showed inactive retention policies as controls | Low (misleading) | Wording corrected; inactive fields flagged and read-only | `test_unenforced_policy_fields_are_flagged_and_immutable` |
+
+Still open: JWT in `sessionStorage` (migration to httpOnly cookies/OIDC needs CSRF protection, a refresh design and
+deployment decisions, so it was **not** changed here); no MFA/SSO; per-client+email lockout; no external audit anchor job.
+
+### Independent review of round 2 — additional findings (all fixed unless stated)
+| Finding | Severity | Fix / status | Evidence |
+|---|---|---|---|
+| `GET /audit` `action_groups` listed action names from **every** organisation | Low (cross-tenant disclosure of activity types) | Scoped by organisation | `test_p1_audit_action_groups_are_org_scoped` |
+| Resuming an attempt credited the whole offline gap (up to the 15-minute cap) to the last item on screen | Medium (distorts response-time evidence) | A resume drops the open interval without crediting it | `test_p2_resume_gap_is_not_credited_to_the_last_item` |
+| A manual submit after deadline + grace was accepted and stamped "now" | Low/Medium (inconsistent with the sweep) | Late submits are finalised at the deadline, exactly like the sweep | `test_p3_submit_after_deadline_plus_grace_is_stamped_at_the_deadline` |
+| **Open:** the audit chain is global, so `GET /audit/verify` (needs `audit.read`) shows any tenant the platform-wide event count, head hash and the id of a broken event | Low (activity-volume side channel) | Not fixed: a per-organisation chain is a design change | `test_p8_audit_verify_exposes_global_counts_to_every_tenant` documents it |
+| **Open:** shared namespaces leak existence/volume: the item importer's duplicate check, generated family numbers (`…-USR-007`) and `ALR-nnnn` alert numbers derive from platform-wide data | Low | Not fixed (follows from global unique codes) | code review |
+| **Open:** `POST /calibration/runs` and `POST /leaks/detect` first finalise expired attempts of **all** organisations (audit events keep the owning organisation) | Info | Intended side effect of the sweep; benign | code review |
+
+**What the audit anchor proves.** `anchor_count` / `anchor_head` compare the chain with a value the *caller* supplies. They
+detect removal of the newest events and a fully recomputed history **only if** that value was recorded earlier in storage
+the database administrator and the application cannot rewrite (write-once object storage, a separate log service, a
+printed/escrowed record). If the anchor is read from the same database or application, or a compromised application
+returns `ok: true`, nothing is proven. The application never stores or signs an anchor, so no key management exists and
+none is claimed. An empty chain verifies as `checked: 0` with the genesis hash.

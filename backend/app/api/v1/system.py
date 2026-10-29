@@ -16,7 +16,7 @@ from app.core.errors import NotFound, Unprocessable
 from app.db.session import get_db
 from app.models import AuditEvent, LeakAlert, Question, TestForm, User
 from app.services import audit
-from app.services.policies import DEFAULT_POLICIES, all_policies, set_policy
+from app.services.policies import DEFAULT_POLICIES, INACTIVE_FIELDS, all_policies, set_policy
 
 router = APIRouter(tags=["system"])
 STARTED = time.time()
@@ -74,6 +74,7 @@ def get_settings_view(user: User = Depends(require("dashboard.read")), db: Sessi
     return {
         "policies": all_policies(db, user.org_id),
         "defaults": DEFAULT_POLICIES,
+        "inactive_fields": INACTIVE_FIELDS,  # {policy: {field: why it has no effect}}
         "model_provider": {"provider": s.llm_provider, "configured": s.llm_configured, "model": s.llm_model,
                            "api_key": "set (hidden)" if s.llm_api_key else "not set",
                            "fallback": "Deterministic, verifiable templates (always available)"},
@@ -90,6 +91,8 @@ def put_policy(key: str, body: PolicyPut, user: User = Depends(require("settings
     if key not in DEFAULT_POLICIES:
         raise NotFound("Unknown policy")
     for k, v in body.values.items():
+        if k in INACTIVE_FIELDS.get(key, {}):
+            raise Unprocessable(f"Field '{k}' is not enforced by this version and cannot be changed: {INACTIVE_FIELDS[key][k]}")
         default = DEFAULT_POLICIES[key].get(k)
         if default is not None and type(default) is not type(v) and not (isinstance(default, float) and isinstance(v, int)):
             raise Unprocessable(f"Field '{k}' must be of type {type(default).__name__}")
@@ -121,18 +124,23 @@ def audit_log(action: str | None = None, entity_type: str | None = None, q: str 
         stmt = stmt.where(AuditEvent.created_at <= date_to)
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.order_by(AuditEvent.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
-    actions = sorted({a.split(".")[0] for a in db.scalars(select(AuditEvent.action).distinct()).all()})
+    actions = sorted({a.split(".")[0] for a in db.scalars(select(AuditEvent.action).where(AuditEvent.org_id == user.org_id).distinct()).all()})
     return {"total": total, "page": page, "page_size": page_size, "action_groups": actions,
             "items": [{"id": e.id, "at": e.created_at, "actor": e.actor_label, "action": e.action, "entity_type": e.entity_type,
                        "entity_id": e.entity_id, "summary": e.summary, "details": e.details} for e in rows]}
 
 
 @router.get("/audit/verify")
-def audit_verify(user: User = Depends(require("audit.read")), db: Session = Depends(get_db)):
-    """Recompute the audit hash chain and report the first tampered/missing event, if any."""
+def audit_verify(anchor_count: int | None = Query(None, ge=1), anchor_head: str | None = Query(None, pattern="^[0-9a-f]{64}$"),
+                 user: User = Depends(require("audit.read")), db: Session = Depends(get_db)):
+    """Recompute the audit hash chain and report the first tampered/missing event, if any. Pass `anchor_count` and
+    `anchor_head` (the `checked`/`head` of an earlier result kept in external, write-once storage) to also detect
+    removal of the newest events. Tamper-evident, not tamper-proof: see docs/security-review.md."""
     from app.services.audit import verify_chain
 
-    return verify_chain(db)
+    if (anchor_count is None) != (anchor_head is None):
+        raise Unprocessable("anchor_count and anchor_head must be given together")
+    return verify_chain(db, anchor_count=anchor_count, anchor_head=anchor_head)
 
 
 @router.post("/system/demo/reset")

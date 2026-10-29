@@ -11,6 +11,7 @@ from app.core.deps import require
 from app.core.errors import NotFound
 from app.db.session import get_db
 from app.models import CalibrationRun, ItemCalibration, Question, Section, User
+from app.services.assessment import finalize_expired
 from app.services.calibration.service import STATUS_LABELS, run_calibration
 from app.services.importers import import_response_log, read_table, validate_response_frame
 
@@ -39,6 +40,7 @@ def _latest(db: Session, org_id: int, run_id: int | None = None) -> CalibrationR
 @router.post("/runs", status_code=201)
 def create_run(body: RunIn, user: User = Depends(require("calibration.run")), db: Session = Depends(get_db)):
     overrides = {k: v for k, v in body.model_dump().items() if v is not None}
+    finalize_expired(db)  # analyses only see scored attempts: score expired ones first
     r = run_calibration(db, user.org_id, user, overrides)
     db.commit()
     return _run_dict(db, r)

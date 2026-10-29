@@ -18,6 +18,7 @@ from app.services.assessment import (
     attempt_state,
     candidate_safe_form,
     get_candidate,
+    focus_item,
     require_access,
     save_answers,
     start_attempt,
@@ -31,7 +32,12 @@ router = APIRouter(prefix="/assessment", tags=["candidate assessment"])
 class AnswerIn(BaseModel):
     item_ref: int
     selected_key: str | None = Field(default=None, pattern="^[ABCD]$")
+    # Deprecated and ignored: kept only so older clients still validate. Timing is measured by the server (see /focus).
     time_spent_ms: int | None = Field(default=None, ge=0, le=3_600_000)
+
+
+class FocusIn(BaseModel):
+    item_ref: int
 
 
 class SaveIn(BaseModel):
@@ -81,6 +87,18 @@ def state(attempt_id: int, user: User = Depends(require("assessment.take")), db:
 def save(attempt_id: int, body: SaveIn, user: User = Depends(require("assessment.take")), db: Session = Depends(get_db)):
     try:
         out = save_answers(db, attempt_id, get_candidate(db, user.id), [a.model_dump() for a in body.answers])
+    except Conflict:
+        db.commit()  # persist a server-side auto-submission (deadline passed) before reporting the conflict
+        raise
+    db.commit()
+    return out
+
+
+@router.post("/attempts/{attempt_id}/focus")
+def focus(attempt_id: int, body: FocusIn, user: User = Depends(require("assessment.take")), db: Session = Depends(get_db)):
+    """Tell the server which item is on screen; the server clock (not the client's) measures the interval."""
+    try:
+        out = focus_item(db, attempt_id, get_candidate(db, user.id), body.item_ref)
     except Conflict:
         db.commit()  # persist a server-side auto-submission (deadline passed) before reporting the conflict
         raise

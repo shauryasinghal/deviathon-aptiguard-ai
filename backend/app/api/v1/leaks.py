@@ -13,6 +13,7 @@ from app.core.deps import require
 from app.core.errors import NotFound
 from app.db.session import get_db
 from app.models import Investigation, LeakAlert, LeakDataset, LeakDetectionRun, LeakRecord, Question, Section, User
+from app.services.assessment import finalize_expired
 from app.services.leakage.importer import import_dataset, preview
 from app.services.leakage.service import EVIDENCE_LABELS, run_detection, transition_alert
 
@@ -72,6 +73,7 @@ def records(ds_id: int, q: str | None = None, page: int = Query(1, ge=1), page_s
 
 @router.post("/detect")
 def detect(body: DetectIn, user: User = Depends(require("leaks.manage")), db: Session = Depends(get_db)):
+    finalize_expired(db)  # analyses only see scored attempts: score expired ones first
     run = run_detection(db, user.org_id, user, replay=body.replay)
     db.commit()
     return {"run_id": run.id, "duration_ms": run.duration_ms, "summary": run.summary, "params": run.params}

@@ -43,3 +43,40 @@
 - **PostgreSQL 17** is tested: the full backend suite, migrations from scratch, `alembic check`, a downgrade/upgrade
   round-trip and a live multi-worker concurrency check all pass on a local throw-away cluster.
 - Tokens remain in `sessionStorage`; revocation is per user, not per device (see security review).
+
+## Hardening round 2 (what changed, what did not)
+- **Tenant isolation:** `GET /review/queue` returned the latest review decisions of *every* organisation (reviewer names,
+  comments, item codes); the response importer matched forms across organisations and `_ensure_slots` matched slots by
+  drive name only. Fixed and covered by `backend/tests/test_tenant_isolation.py`. That test probes the object-level routes
+  listed in it; routes added later must be added there. Isolation is **not** proven complete.
+- **Shared namespaces:** `Slot.code`, `TestForm.code`, `Question.code`, `VariantFamily.code` and `LeakAlert.code` are still
+  globally unique. The importer refuses codes owned by another organisation (422) and generated slot codes get an `-O<org>`
+  suffix on collision. `Slot (org, drive, sequence)` and `Candidate (org, code)` are per-organisation since migration 0007
+  (downgrade fails if two organisations now share such values).
+- **Response times** are measured by the server from `focus` events (migration 0006). Client `time_spent_ms` is accepted
+  but ignored. A time interval is capped at 15 minutes; a missed navigation event misattributes time to the previous item;
+  an item never reported on screen has no response time (NULL). This is time-on-screen, not attention or reading time,
+  and a response time alone is not evidence of cheating. Older/scripted clients that send no `focus` events produce no RT data.
+- **Expiry:** expired attempts are finalised by a sweep every `EXPIRY_SWEEP_SECONDS` (default 60, per API process; safe with
+  several workers), by `scripts/finalize_expired.py`, and before calibration and leak detection. If the sweeper is disabled
+  and nothing else runs, attempts are still only finalised lazily. Auto-submitted attempts are stamped at their deadline.
+- **Policies not enforced** (read-only in the UI, rejected by the API): `retention.response_retention_days`,
+  `retention.audit_retention_days`, `retention.pseudonymize_candidates`, `review.verbal_requires_second_look`. No data is
+  deleted or anonymised; a retention design (what, who, how audit evidence survives) is needed first.
+- **Audit anchor:** `GET /audit/verify?anchor_count=N&anchor_head=<hash>` detects removal of the newest events and a fully
+  recomputed history, but only if the operator stored `checked`/`head` somewhere the database administrator cannot write.
+  Nothing stores it automatically.
+- **Form comparability** is an advisory mean-difficulty comparison from the latest Rasch run (`services/assembly/comparability.py`).
+  Assembly still enforces band counts, not equivalence; calibrated coverage must reach 80% of a form before forms are compared.
+
+### Review follow-ups (round 3)
+- **Resume semantics:** `POST /assessment/forms/{id}/attempts` on an in-progress attempt discards the open timing interval
+  (unobserved time is not credited). A second browser tab therefore also interrupts the first tab's current interval.
+  Out-of-order events from two tabs can misattribute time between items, but the total credited never exceeds elapsed
+  wall-clock time because there is a single pointer per attempt. A candidate (or script) controls *when* focus events are
+  sent, so response times are server-measured, not tamper-proof.
+- **Late submit:** `submit` after deadline + 30 s grace finalises the attempt at its deadline (same as the sweep). Answers
+  saved inside the grace window (up to 30 s after the deadline) are scored although `submitted_at` is the deadline.
+- **Slot pace normalisation** in the response-time test (`leakage/stats.py`, `slot_rt`) uses the median over all rows,
+  including unanswered ones; item-level response-time tests use answered rows only. Not changed (would alter results).
+- **Migration 0007 downgrade** fails cleanly (revision stays 0007, no data lost) if two organisations share a candidate code or drive/sequence.

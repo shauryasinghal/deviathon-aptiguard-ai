@@ -101,6 +101,16 @@ def import_response_log(db: Session, org_id: int, user: User | None, df: pd.Data
             report["warnings"].append(f"{mism} row(s) where supplied is_correct disagrees with the bank's answer key; "
                                       "the bank key is used")
     # slots
+    # Slot and form codes are globally unique (shared namespace). A code that belongs to ANOTHER organisation must
+    # never be reused or attached to: refuse with a clear message instead of failing on the unique constraint.
+    taken_slots = set(db.scalars(select(Slot.code).where(Slot.code.in_(df["slot_code"].astype(str).unique().tolist()),
+                                                         Slot.org_id != org_id)).all())
+    taken_forms = set(db.scalars(select(TestForm.code).join(Slot, Slot.id == TestForm.slot_id)
+                                 .where(TestForm.code.in_(df["form_code"].astype(str).unique().tolist()),
+                                        Slot.org_id != org_id)).all())
+    if taken_slots or taken_forms:
+        raise Unprocessable("Some slot/form codes are already used by another organisation; choose different codes",
+                            {"slot_codes": sorted(taken_slots)[:10], "form_codes": sorted(taken_forms)[:10]})
     slots = {s.code: s for s in db.scalars(select(Slot).where(Slot.org_id == org_id)).all()}
     for code, g in df.groupby("slot_code"):
         if code in slots:
@@ -114,7 +124,7 @@ def import_response_log(db: Session, org_id: int, user: User | None, df: pd.Data
         slots[code] = s
     db.flush()
     # forms + manifests
-    forms = {f.code: f for f in db.scalars(select(TestForm)).all()}
+    forms = {f.code: f for f in db.scalars(select(TestForm).join(Slot, Slot.id == TestForm.slot_id).where(Slot.org_id == org_id)).all()}
     for code, g in df.groupby("form_code"):
         if code in forms:
             continue
@@ -147,7 +157,8 @@ def import_response_log(db: Session, org_id: int, user: User | None, df: pd.Data
                          "submitted_at": sub, "score": float(g["computed_correct"].sum()), "max_score": float(len(g)),
                          "is_synthetic": is_synthetic})
     db.execute(insert(Attempt), att_rows)
-    att = {(a.candidate_id, a.form_id): a.id for a in db.scalars(select(Attempt)).all()}
+    att = {(a.candidate_id, a.form_id): a.id for a in db.scalars(
+        select(Attempt).where(Attempt.form_id.in_([f.id for f in forms.values()]))).all()}
     rt = pd.to_numeric(df["response_time_ms"], errors="coerce") if "response_time_ms" in df else pd.Series(np.nan, index=df.index)
     resp = [{"attempt_id": att[(cands[c], forms[f].id)], "question_id": int(q), "selected_key": s,
              "is_correct": bool(ok), "response_time_ms": None if pd.isna(t) else int(t),
@@ -251,7 +262,7 @@ def import_item_bank(db: Session, org_id: int, user: User | None, df: pd.DataFra
             db.flush()
             families[fam_code] = fam
         parent_code = str(r.get("parent_code") or "").strip()
-        parent = code_to_q.get(parent_code) or (db.scalar(select(Question).where(Question.code == parent_code)) if parent_code else None)
+        parent = code_to_q.get(parent_code) or (db.scalar(select(Question).where(Question.code == parent_code, Question.org_id == org_id)) if parent_code else None)
         q = Question(code=code, org_id=org_id, section_id=sections[sec].id, family_id=fam.id, parent_id=parent.id if parent else None,
                      is_source=parent is None, skill=item.skill, tags=[], stem=item.stem, explanation=item.explanation,
                      difficulty_target=diff, difficulty_target_b=DIFFICULTY_B[diff], status=item_status, status_reason=item_reason,

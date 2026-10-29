@@ -1,6 +1,7 @@
 """Candidate assessment delivery. The answer key never leaves the server before (or after) submission."""
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy import select, update
@@ -14,7 +15,11 @@ from app.services import audit
 from app.services.exposure.service import record_administration
 from app.services.policies import get_policy
 
+log = logging.getLogger("aptiguard.assessment")
 GRACE_SECONDS = 30
+# One continuous on-screen interval is credited at most this long. A candidate who walks away from an item for longer
+# is not credited with the whole gap, so a single missed navigation event cannot dominate response-time statistics.
+MAX_ITEM_INTERVAL_MS = 15 * 60 * 1000
 
 
 def candidate_safe_form(db: Session, form: TestForm) -> dict:
@@ -94,6 +99,12 @@ def start_attempt(db: Session, candidate: Candidate, form: TestForm) -> dict:
     if existing:  # resume (also after the window closes) — never a second attempt
         if existing.status == "in_progress" and existing.deadline_at < utcnow() - timedelta(seconds=GRACE_SECONDS):
             _auto_finalize(db, existing)
+        elif existing.status == "in_progress" and existing.current_item_since is not None:
+            # A resume means the candidate was away (closed tab, lost connection, second tab). Time nobody observed is
+            # not credited to the last item: drop the open interval; the next focus event starts a fresh one.
+            db.execute(update(Attempt).where(Attempt.id == existing.id, Attempt.status == "in_progress")
+                       .values(current_item_ref=None, current_item_since=None).execution_options(synchronize_session=False))
+            db.refresh(existing)
         return _attempt_view(db, existing)
     if form.status != "published":
         raise Conflict("This assessment is not open for candidates" + (
@@ -161,17 +172,15 @@ def save_answers(db: Session, attempt_id: int, candidate: Candidate, answers: li
         key = ans.get("selected_key")
         if key is not None and key not in ("A", "B", "C", "D"):
             raise Unprocessable(f"Invalid option '{key}'")
-        t = ans.get("time_spent_ms")
-        clean.append((fi, key, max(0, min(int(t), 3_600_000)) if t is not None else None))
-    for fi, key, t in clean:
+        # ans["time_spent_ms"] (sent by older clients) is deliberately ignored: only server-observed timing is stored.
+        clean.append((fi, key))
+    for fi, key in clean:
         r = db.scalar(select(Response).where(Response.attempt_id == a.id, Response.question_id == fi.question_id))
         if r:
             r.selected_key = key
             r.answered_at = utcnow()
-            if t is not None:
-                r.response_time_ms = (r.response_time_ms or 0) + t
         else:
-            db.add(Response(attempt_id=a.id, question_id=fi.question_id, selected_key=key, response_time_ms=t))
+            db.add(Response(attempt_id=a.id, question_id=fi.question_id, selected_key=key))
     db.flush()
     return _attempt_view(db, a)
 
@@ -192,6 +201,11 @@ def _finalize(db: Session, a: Attempt, auto: bool = False) -> None:
         db.refresh(a)
         raise Conflict("Attempt already submitted", {"attempt_id": a.id})
     db.refresh(a)
+    now = utcnow()
+    # an automatic submission happens at (or after) the deadline; never credit time or stamp a submission beyond it
+    end = min(now, a.deadline_at) if auto else now
+    _credit_open_interval(db, a, end)
+    db.flush()  # the credited Response must be visible to the query below (unique attempt×question)
     form = db.get(TestForm, a.form_id)
     weights = {}
     if form.assembly_run_id:
@@ -221,7 +235,7 @@ def _finalize(db: Session, a: Attempt, auto: bool = False) -> None:
         if r.is_correct:
             s["score"] += w
             score += w
-    a.status, a.submitted_at = "submitted", utcnow()
+    a.status, a.submitted_at = "submitted", end
     a.score, a.max_score, a.section_scores = score, max_score, sections
     if a.review_flags and a.review_flags.get("items"):
         db.flush()
@@ -230,10 +244,97 @@ def _finalize(db: Session, a: Attempt, auto: bool = False) -> None:
                  f"Attempt #{a.id} {'auto-' if auto else ''}submitted", org_id=form.slot.org_id)
 
 
+def _credit(db: Session, a: Attempt, ref: int | None, since, end) -> None:
+    """Add the server-observed interval [since, end] to the item `ref` (capped; ignores unknown/foreign items)."""
+    if ref is None or since is None:
+        return
+    fi = db.get(FormItem, ref)
+    if fi is None or fi.form_id != a.form_id:
+        return
+    ms = max(0, min(int((end - since).total_seconds() * 1000), MAX_ITEM_INTERVAL_MS))
+    r = db.scalar(select(Response).where(Response.attempt_id == a.id, Response.question_id == fi.question_id))
+    if r is None:
+        db.add(Response(attempt_id=a.id, question_id=fi.question_id, selected_key=None, response_time_ms=ms))
+    else:
+        r.response_time_ms = (r.response_time_ms or 0) + ms
+
+
+def _credit_open_interval(db: Session, a: Attempt, end) -> None:
+    """Credit the interval that is currently open (server clock) to its item and clear it. Caller holds the attempt row."""
+    ref, since = a.current_item_ref, a.current_item_since
+    a.current_item_ref = a.current_item_since = None
+    _credit(db, a, ref, since, end)
+
+
+def focus_item(db: Session, attempt_id: int, candidate: Candidate, item_ref: int) -> dict:
+    """Record that `item_ref` is now on screen, using the server clock only.
+
+    * the interval of the previously reported item ends now and is credited to it (capped, clipped to the deadline);
+    * repeating the current item (refresh, retry, duplicate request) is a no-op — it never restarts or double-counts;
+    * unknown items, other candidates' attempts and finished attempts are rejected;
+    * concurrent events are resolved by a compare-and-swap on the attempt row, so each interval is credited once.
+    This measures how long the client said an item was displayed, not attention or reading time.
+    """
+    a = _load_attempt(db, attempt_id, candidate)
+    if a.status != "in_progress":
+        raise Conflict("Attempt already submitted")
+    if a.deadline_at < utcnow() - timedelta(seconds=GRACE_SECONDS):
+        _auto_finalize(db, a)
+        raise Conflict("Time is over; the attempt was submitted automatically")
+    fi = db.get(FormItem, item_ref)
+    if fi is None or fi.form_id != a.form_id:
+        raise Unprocessable(f"Item {item_ref} is not part of this assessment")
+    if a.current_item_ref == item_ref:
+        return {"recorded": False}
+    now = utcnow()
+    old_ref, old_since = a.current_item_ref, a.current_item_since
+    cas = [Attempt.id == a.id, Attempt.status == "in_progress",
+           Attempt.current_item_ref.is_(None) if old_ref is None else Attempt.current_item_ref == old_ref,
+           Attempt.current_item_since.is_(None) if old_since is None else Attempt.current_item_since == old_since]
+    won = db.execute(update(Attempt).where(*cas).values(current_item_ref=item_ref, current_item_since=now)
+                     .execution_options(synchronize_session=False)).rowcount
+    if won != 1:  # another request moved the pointer (or the attempt ended) first: ours is a duplicate/stale event
+        db.refresh(a)
+        return {"recorded": False}
+    _credit(db, a, old_ref, old_since, min(now, a.deadline_at))
+    db.flush()
+    return {"recorded": True}
+
+
+def finalize_expired(db: Session, limit: int = 200) -> int:
+    """Finalise attempts that are past deadline + grace. Idempotent and safe to run from several processes at once:
+    each attempt is claimed with a guarded UPDATE, so exactly one runner scores it and the others skip it."""
+    cutoff = utcnow() - timedelta(seconds=GRACE_SECONDS)
+    ids = db.scalars(select(Attempt.id).where(Attempt.status == "in_progress", Attempt.deadline_at < cutoff)
+                     .order_by(Attempt.id).limit(limit)).all()
+    done = 0
+    for aid in ids:
+        a = db.get(Attempt, aid)
+        if a is None or a.status != "in_progress":
+            continue
+        try:
+            with db.begin_nested():  # a failure part-way rolls back this attempt only; it stays in_progress for a retry
+                _finalize(db, a, auto=True)
+            db.commit()
+            done += 1
+        except Conflict:  # finalised concurrently by another request/runner
+            db.rollback()
+        except Exception:  # noqa: BLE001 - one bad attempt must not starve the others; it stays in_progress for a retry
+            db.rollback()
+            log.exception("could not finalise expired attempt %s", aid)
+    return done
+
+
 def submit(db: Session, attempt_id: int, candidate: Candidate) -> dict:
     a = _load_attempt(db, attempt_id, candidate)
     if a.status != "in_progress":
         raise Conflict("Attempt already submitted", {"attempt_id": a.id})
+    if a.deadline_at < utcnow() - timedelta(seconds=GRACE_SECONDS):
+        # Past deadline + grace: a late manual submit must not be stamped "now". Finalise exactly as the sweep would
+        # (at the deadline); answers could not be saved after the grace period, so the score is the same.
+        _auto_finalize(db, a)
+        db.flush()
+        return _attempt_view(db, a)
     _finalize(db, a)
     db.flush()
     return _attempt_view(db, a)

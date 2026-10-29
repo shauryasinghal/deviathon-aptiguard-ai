@@ -107,10 +107,12 @@ def queue(section: str | None = None, validation: str | None = None, user: User 
         src = db.get(Question, q.parent_id) if q.parent_id else None
         out.append({"item": question_detail(db, q), "source": question_detail(db, src) if src else None,
                     "history": revisions(db, q.id)})
-    recent = db.scalars(select(ReviewDecision).order_by(ReviewDecision.id.desc()).limit(15)).all()
+    # decisions are scoped through the question's organisation: they carry reviewer names and free-text comments
+    recent = db.execute(select(ReviewDecision, Question.code).join(Question, Question.id == ReviewDecision.question_id)
+                        .where(Question.org_id == user.org_id).order_by(ReviewDecision.id.desc()).limit(15)).all()
     return {"items": out, "total": len(out), "recent_decisions": [
-        {"question_code": db.get(Question, d.question_id).code, "decision": d.decision, "by": user_label(db, d.reviewer_id),
-         "at": d.created_at, "comment": d.comment} for d in recent]}
+        {"question_code": code, "decision": d.decision, "by": user_label(db, d.reviewer_id),
+         "at": d.created_at, "comment": d.comment} for d, code in recent]}
 
 
 @router.post("/review/{qid}/decision")

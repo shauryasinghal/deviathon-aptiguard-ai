@@ -75,3 +75,18 @@ posts, 25 unrelated posts, 2 ability-shifted cohorts. At medium severity or high
 non-leaked bank items. With n = 9 the recall's Wilson 95% CI is [0.70, 1.00]; FPR 0/547, CI [0, 0.007]. These labels are
 the *development* scenario the thresholds were designed on, so they are not independent validation.
 Details: `docs/evidence/validation_results.json` and the synthetic pipeline report.
+
+## Addendum — hardening round 2 (executed 2026-10-29, this working tree)
+| Check | Result |
+|---|---|
+| Backend, SQLite | **267 passed** (220 existing + 47 new; includes the independent-review regressions) |
+| Backend, PostgreSQL 17.11 (throw-away local cluster) | **267 passed** |
+| Migrations 0001→0007, `alembic check` (SQLite and PostgreSQL) | no drift |
+| PostgreSQL downgrade to 0003 and upgrade to head | pass |
+| SQLite seeded DB: downgrade to 0005, upgrade to head | row counts unchanged (slots 20, candidates 1503, attempts 1500, responses 45000, audit 25); audit chain valid |
+| Frontend typecheck / unit tests | clean / 9 passed |
+| Browser E2E (Playwright, 7 journeys) | **7 passed** — run with the cached Chromium revision 1243 through a temporary config outside the repo, because this Playwright version expects revision 1248 which is not installed |
+Not run: Docker/Compose, actionlint, hadolint, `scripts/concurrency_check.py`, `pip-audit`, `npm audit`, hosted CI.
+Independent review run: three E2E runs gave 7/7, then 1 failure (journey 1 timed out at 1.5 min while PostgreSQL tests ran
+concurrently), then 7/7 twice. Backend calls measured 0.3 s (calibration) and 0.9 s (detection); machine load was high during the slow runs.
+The cause of the one timeout is not proven.

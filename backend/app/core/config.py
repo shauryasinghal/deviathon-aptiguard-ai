@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     max_request_mb: int = 12
     max_upload_mb: int = 10
     log_level: str = "INFO"
+    # Seconds between background sweeps that finalise expired attempts (0 disables the in-process sweeper; the
+    # scripts/finalize_expired.py command and the lazy checks still work). Safe with several workers.
+    expiry_sweep_seconds: int = Field(default=60, ge=0, le=3600)
 
     # Optional LLM integration. Empty key => deterministic template fallback.
     llm_provider: str = "none"  # none | anthropic

@@ -1,9 +1,11 @@
 """AptiGuard AI — FastAPI application (modular monolith)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +21,38 @@ settings = get_settings()
 configure_logging(settings.log_level)
 log = logging.getLogger("aptiguard.http")
 
+async def _expiry_sweeper(interval: int) -> None:
+    """Finalise attempts whose deadline has passed even if the candidate never returns. No extra infrastructure:
+    the guarded claim in finalize_expired makes several workers (or scripts/finalize_expired.py) safe together."""
+    from app.db.session import SessionLocal
+    from app.services.assessment import finalize_expired
+
+    def once() -> int:
+        with SessionLocal() as db:
+            return finalize_expired(db)
+
+    while True:
+        try:
+            n = await asyncio.to_thread(once)
+            if n:
+                log.info("expiry sweep finalised %d attempt(s)", n)
+        except Exception:  # noqa: BLE001 - the sweeper must never die; the next tick retries
+            log.exception("expiry sweep failed")
+        await asyncio.sleep(interval)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = asyncio.create_task(_expiry_sweeper(settings.expiry_sweep_seconds)) if settings.expiry_sweep_seconds > 0 else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="AptiGuard AI API",
     version=APP_VERSION,
     description="Assessment-integrity platform: parallel item generation, human review, calibration, exposure-aware "

@@ -11,7 +11,7 @@ from app.db.base import Base, TimestampMixin, utcnow
 
 class Slot(TimestampMixin, Base):
     __tablename__ = "slots"
-    __table_args__ = (UniqueConstraint("drive", "sequence"),)
+    __table_args__ = (UniqueConstraint("org_id", "drive", "sequence", name="uq_slots_org_drive_sequence"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
     code: Mapped[str] = mapped_column(String(40), unique=True)
@@ -101,6 +101,11 @@ class Attempt(Base):
     # after it was scored, with an alternative score excluding them. The official score is never changed silently.
     review_flags: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_synthetic: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Server-observed item timing (migration 0006): the form item the candidate's client last reported as on screen and
+    # the *server* time that report was received. Elapsed time is credited to Response.response_time_ms when the next
+    # event arrives or the attempt is finalised. Client-supplied durations are never used.
+    current_item_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_item_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Response(Base):
@@ -111,6 +116,8 @@ class Response(Base):
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"), index=True)
     selected_key: Mapped[str | None] = mapped_column(String(2), nullable=True)  # NULL => omitted
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Server-observed milliseconds the item was reported on screen (see Attempt.current_item_*). NULL = not observed.
+    # Not a measure of attention or reading time.
     response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     answered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

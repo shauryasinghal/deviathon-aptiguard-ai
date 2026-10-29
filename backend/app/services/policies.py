@@ -58,6 +58,20 @@ DEFAULT_POLICIES: dict[str, dict] = {
 }
 
 
+# Stored for forward compatibility but read by NO application code. They are shown as "not enforced" and cannot be
+# edited, so nobody mistakes them for active controls. Enforcing retention needs a defined policy (what is deleted or
+# anonymised, who may trigger it, how audit evidence is preserved) — see docs/known-limitations.md.
+INACTIVE_FIELDS: dict[str, dict[str, str]] = {
+    "retention": {
+        "response_retention_days": "No purge job exists; responses are kept indefinitely.",
+        "audit_retention_days": "No purge job exists; audit events are kept indefinitely (deleting them would also break the hash chain).",
+        "pseudonymize_candidates": "Not read anywhere. Candidates are pseudonymous codes by construction, but this flag changes nothing.",
+    },
+    "review": {
+        "verbal_requires_second_look": "Not enforced: verbal items need human review like all items, but no second reviewer is required.",
+    },
+}
+
 ENUM_FIELDS = {"assessment": {"deadline_mode": ("full_duration", "slot_end")}}
 
 

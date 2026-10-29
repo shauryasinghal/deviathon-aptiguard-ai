@@ -136,7 +136,8 @@ def _section_id(db: Session, code: str) -> int:
 
 
 def _ensure_slots(db: Session, org_id: int, drive: str, n: int, start: datetime) -> list[Slot]:
-    existing = {s.sequence: s for s in db.scalars(select(Slot).where(Slot.drive == drive)).all()}
+    # Slots belong to one organisation: another tenant's drive of the same name must never be reused or extended.
+    existing = {s.sequence: s for s in db.scalars(select(Slot).where(Slot.org_id == org_id, Slot.drive == drive)).all()}
     slots = []
     for k in range(1, n + 1):
         if k in existing:
@@ -144,13 +145,36 @@ def _ensure_slots(db: Session, org_id: int, drive: str, n: int, start: datetime)
             continue
         day, half = divmod(k - 1, 2)
         st = start + timedelta(days=day, hours=5 * half)
-        s = Slot(org_id=org_id, code=f"{_drive_code(drive)}-{hashlib.sha1(drive.encode()).hexdigest()[:4].upper()}-S{k:02d}", drive=drive, sequence=k,
+        code = f"{_drive_code(drive)}-{hashlib.sha1(drive.encode()).hexdigest()[:4].upper()}-S{k:02d}"
+        if db.scalar(select(Slot.id).where(Slot.code == code)):  # slot codes share one namespace across tenants
+            code = f"{code}-O{org_id}"
+        s = Slot(org_id=org_id, code=code, drive=drive, sequence=k,
                  name=f"{drive} · Slot {k}", starts_at=st, ends_at=st + timedelta(hours=1), status="scheduled",
                  is_synthetic=False)
         db.add(s)
         slots.append(s)
-    db.flush()
+        db.flush()
     return slots
+
+
+def run_comparability(db: Session, org_id: int, forms: list[TestForm]) -> dict:
+    """Advisory comparability of the forms of one run, from the latest Rasch calibration (see comparability.py)."""
+    from app.services.assembly.comparability import compare_forms, form_difficulty
+    from app.services.calibration.service import equivalence_decision
+
+    pol = get_policy(db, org_id, "calibration")
+    run = db.scalar(select(CalibrationRun).where(CalibrationRun.org_id == org_id, CalibrationRun.rasch_fitted.is_(True))
+                    .order_by(CalibrationRun.id.desc()))
+    cal = {}
+    if run:
+        cal = {qid: (b, se) for qid, b, se in db.execute(
+            select(ItemCalibration.question_id, ItemCalibration.rasch_b, ItemCalibration.rasch_se)
+            .where(ItemCalibration.run_id == run.id, ItemCalibration.rasch_b.is_not(None),
+                   ItemCalibration.rasch_se.is_not(None))).all()}
+    per_form = {f.code: form_difficulty([cal.get(fi.question_id) for fi in f.items]) for f in forms}
+    out = compare_forms(per_form, float(pol["tolerance_logits"]), equivalence_decision)
+    out["calibration_run_id"] = run.id if run else None
+    return out
 
 
 def publish_run(db: Session, run: AssemblyRun, user: User | None) -> int:

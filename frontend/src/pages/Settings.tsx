@@ -18,14 +18,14 @@ export default function Settings() {
   const s = useQuery({ queryKey: ["settings"], queryFn: () => api<any>("/settings") });
   return (
     <div>
-      <PageHeader eyebrow="Governance" title="Settings & audit" description="Assessment policies, model-provider status, retention and the immutable audit trail." />
+      <PageHeader eyebrow="Governance" title="Settings & audit" description="Assessment policies, model-provider status and the tamper-evident (hash-chained) audit trail. Policies marked “not enforced” have no effect yet." />
       <Tabs defaultValue={params.get("tab") ?? "policies"}>
         <TabsList className="mb-5"><TabsTrigger value="policies">Policies</TabsTrigger><TabsTrigger value="system">System</TabsTrigger>
           {can("audit.read") && <TabsTrigger value="audit">Audit log</TabsTrigger>}</TabsList>
         <TabsContent value="policies">
           {s.isError ? <Card><ErrorState error={s.error} /></Card> : !s.data ? <Card><LoadingRows /></Card> : (
             <div className="grid gap-5 lg:grid-cols-2">
-              {Object.entries(s.data.policies).map(([k, v]) => <PolicyCard key={k} name={k} values={v as any} canEdit={s.data.can_manage} />)}
+              {Object.entries(s.data.policies).map(([k, v]) => <PolicyCard key={k} name={k} values={v as any} canEdit={s.data.can_manage} inactive={s.data.inactive_fields?.[k] ?? {}} />)}
             </div>
           )}
         </TabsContent>
@@ -44,13 +44,13 @@ export default function Settings() {
   );
 }
 
-function PolicyCard({ name, values, canEdit }: { name: string; values: Record<string, any>; canEdit: boolean }) {
+function PolicyCard({ name, values, canEdit, inactive }: { name: string; values: Record<string, any>; canEdit: boolean; inactive: Record<string, string> }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Record<string, any>>(values);
   const m = useMutation({
     mutationFn: () => {
       const changed: Record<string, any> = {};
-      for (const [k, v] of Object.entries(draft)) if (JSON.stringify(v) !== JSON.stringify(values[k])) changed[k] = typeof values[k] === "number" ? Number(v) : v;
+      for (const [k, v] of Object.entries(draft)) if (!(k in inactive) && JSON.stringify(v) !== JSON.stringify(values[k])) changed[k] = typeof values[k] === "number" ? Number(v) : v;
       return api(`/settings/policies/${name}`, { method: "PUT", body: { values: changed } });
     },
     onSuccess: () => { toast.success(`${titleCase(name)} policy saved`); qc.invalidateQueries(); },
@@ -60,10 +60,12 @@ function PolicyCard({ name, values, canEdit }: { name: string; values: Record<st
     <Card><CardHeader title={`${titleCase(name)} policy`} actions={canEdit && <Button size="sm" variant="primary" loading={m.isPending} onClick={() => m.mutate()}><Save />Save</Button>} />
       <CardBody className="grid grid-cols-2 gap-3">
         {Object.entries(draft).map(([k, v]) => (
-          <div key={k}><Label htmlFor={`${name}-${k}`}>{titleCase(k)}</Label>
-            {typeof v === "boolean" ? <select id={`${name}-${k}`} disabled={!canEdit} value={String(v)} onChange={(e) => setDraft({ ...draft, [k]: e.target.value === "true" })} className="h-9 w-full rounded-md border border-line-strong bg-surface-2 px-2 text-sm"><option value="true">true</option><option value="false">false</option></select>
+          <div key={k}><Label htmlFor={`${name}-${k}`}>{titleCase(k)}{k in inactive && <span className="ml-1.5 rounded border border-line px-1 text-[10.5px] font-normal uppercase tracking-wide text-fg-subtle" title={inactive[k]}>not enforced</span>}</Label>
+            {k in inactive ? <Input id={`${name}-${k}`} disabled value={String(v)} aria-describedby={`${name}-${k}-why`} />
+              : typeof v === "boolean" ? <select id={`${name}-${k}`} disabled={!canEdit} value={String(v)} onChange={(e) => setDraft({ ...draft, [k]: e.target.value === "true" })} className="h-9 w-full rounded-md border border-line-strong bg-surface-2 px-2 text-sm"><option value="true">true</option><option value="false">false</option></select>
               : Array.isArray(v) ? <Input id={`${name}-${k}`} disabled value={v.join(", ")} />
                 : <Input id={`${name}-${k}`} type="number" step="any" disabled={!canEdit} value={v} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} />}
+            {k in inactive && <p id={`${name}-${k}-why`} className="mt-1 text-[11.5px] text-fg-subtle">{inactive[k]}</p>}
           </div>
         ))}
       </CardBody></Card>
