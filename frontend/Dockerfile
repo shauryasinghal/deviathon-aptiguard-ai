@@ -10,4 +10,4 @@ FROM nginxinc/nginx-unprivileged:1.30-alpine
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
-HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]

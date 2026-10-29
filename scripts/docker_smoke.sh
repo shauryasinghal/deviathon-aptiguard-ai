@@ -31,7 +31,7 @@ curl -fsS -H "Authorization: Bearer $TOK" "$API/assessment/available" | json 'le
 ATOK=$(curl -fsS -X POST "$API/auth/login" -H 'Content-Type: application/json' \
        -d "{\"email\":\"admin@aptiguard.demo\",\"password\":\"$PW\"}" | json 'd["access_token"]')
 curl -fsS -H "Authorization: Bearer $ATOK" "$API/audit/verify" | json 'd["ok"]' | grep -qx True || fail "audit chain"
-docker inspect -f '{{.Config.User}}' "$($DEMO ps -q backend)" | grep -qx app || fail "backend not running as non-root user"
+[ "$($DEMO exec -T backend id -u)" = "10001" ] || fail "backend not running as non-root user 10001"
 $DEMO logs backend | grep -q "applying database migrations" || fail "migration log line missing"
 before=$(echo "$ready" | json 'd["questions"]')
 

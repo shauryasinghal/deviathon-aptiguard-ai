@@ -7,13 +7,13 @@ RUN pip install -r requirements.txt
 COPY backend/ /srv/backend/
 COPY scripts/ /srv/scripts/
 COPY data/synthetic/ /srv/data/synthetic/
-RUN useradd --create-home --uid 10001 app \
+RUN groupadd --gid 10001 app && useradd --create-home --uid 10001 --gid 10001 app \
     && mkdir -p /srv/backend/var \
     && chown -R app:app /srv/backend/var /srv/data \
     && chmod +x /srv/backend/docker-entrypoint.sh
-USER app
+USER 10001:10001
 EXPOSE 8000
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6 \
-  CMD python -c "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready',timeout=2).status==200 else 1)"
+  CMD ["python", "-c", "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready',timeout=2).status==200 else 1)"]
 ENTRYPOINT ["/srv/backend/docker-entrypoint.sh"]
