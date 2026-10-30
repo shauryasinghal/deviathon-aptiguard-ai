@@ -109,10 +109,10 @@ def test_failed_login_audit_does_not_store_password(client, db):
 
 def test_production_guard_rejects_unsafe_configuration():
     with pytest.raises(ValueError, match="DEMO_MODE"):
-        Settings(app_env="production", demo_mode=True, jwt_secret="y" * 48)
+        Settings(_env_file=None, app_env="production", demo_mode=True, jwt_secret="y" * 48)
     with pytest.raises(ValueError, match="JWT_SECRET"):
-        Settings(app_env="production", demo_mode=False)
-    ok = Settings(app_env="production", demo_mode=False, jwt_secret="z" * 48)
+        Settings(_env_file=None, app_env="production", demo_mode=False)
+    ok = Settings(_env_file=None, app_env="production", demo_mode=False, jwt_secret="z" * 48)
     assert ok.is_production
 
 

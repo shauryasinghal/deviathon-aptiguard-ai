@@ -114,6 +114,7 @@ means the code exists and is covered by tests in this repository, not that it ha
 | Attempt integrity review | Flag attempts affected by withdrawn items; staff resolution with reason | Implemented |
 | Role-based permissions | 5 roles, 19 server-checked permissions | Implemented |
 | Audit log with hash chain | Append-only SHA-256 chain with verify endpoint; optional external anchor (`anchor_count` + `anchor_head`) detects removal of the newest events | Implemented — tamper-*evident*, not tamper-proof |
+| Email/password sign-up, password reset, Google sign-in | Three sign-in methods side by side (plus unchanged demo login); self-registration creates candidates only | Implemented and tested with a **mocked** Google provider; no real Google flow run; no email delivery or email verification — see [docs/authentication.md](docs/authentication.md) |
 | Server-observed item timing | Response times come from server-clock `focus` events, never from client-reported durations | Implemented — measures time on screen, not attention |
 | Expired-attempt finalisation | Background sweep + `scripts/finalize_expired.py`; idempotent and race-safe | Implemented |
 | Form comparability summary | Advisory mean-difficulty comparison of forms from Rasch estimates, with uncertainty | Implemented — advisory only; not an equivalence guarantee |
@@ -149,7 +150,7 @@ flowchart LR
     API --> AUD["audit hash chain"]
   end
   GEN -. "optional, off by default" .-> LLM["Anthropic API"]
-  GEN & VAL & CAL & EXP & ASM & LEAK & INT & REP & AUD --> DB[("SQLite default<br/>PostgreSQL supported<br/>Alembic 0001–0007")]
+  GEN & VAL & CAL & EXP & ASM & LEAK & INT & REP & AUD --> DB[("SQLite default<br/>PostgreSQL supported<br/>Alembic 0001–0008")]
 ```
 
 The backend is a single FastAPI application. Routers in `backend/app/api/v1/` handle routing, permission checks and
@@ -272,7 +273,7 @@ is possible, and the demo password is public by design.
 | Backend | Python 3.11+, FastAPI 0.162, Uvicorn 0.54, Pydantic 2.14 | REST API ([backend/requirements.txt](backend/requirements.txt)) |
 | Auth | PyJWT 2.15, bcrypt 4.2 | Tokens and password hashing |
 | Database | SQLite (default), PostgreSQL via psycopg 3.2 | Persistence; SQLAlchemy 2.0.36 ORM |
-| Migrations | Alembic 1.14 (revisions 0001–0007) | Schema management |
+| Migrations | Alembic 1.14 (revisions 0001–0008) | Schema management |
 | Analytics | NumPy 2.1, SciPy 1.14, pandas 2.2, scikit-learn 1.6 | Statistics and text similarity |
 | Reporting | ReportLab 4.2 | PDF export |
 | Optional AI | `anthropic` (via [requirements-llm.txt](backend/requirements-llm.txt)) | Optional variant generation |
@@ -382,6 +383,11 @@ Copy [.env.example](.env.example) to `.env` (git-ignored) and adjust. Use placeh
 | `EXPIRY_SWEEP_SECONDS` | Interval of the in-process sweep that finalises expired attempts; `0` disables it (then run `scripts/finalize_expired.py` from cron) | No | `60` |
 | `DEMO_SEED` | Docker only: seed demo data into an *empty* database at start | No | `false` |
 | `FORWARDED_ALLOW_IPS` | Trusted proxies for `X-Forwarded-For` | No | `127.0.0.1` |
+| `REGISTRATION_ORG_SLUG` | Organisation that self-registered candidates join; empty disables public sign-up | No | `<organisation-slug>` |
+| `FRONTEND_URL` | Where the Google callback sends the browser (https in production) | No | `http://localhost:5173` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth web client (backend only) | Only for Google sign-in | `<client-id>` / `<client-secret>` |
+| `GOOGLE_REDIRECT_URI` | Must match the Google console exactly | Only for Google sign-in | `http://localhost:8000/api/v1/auth/google/callback` |
+| `PASSWORD_RESET_DELIVERY` | `none` or `log` (development only) | No | `none` |
 | `LLM_PROVIDER` | `none` or `anthropic` (optional generation) | No | `none` |
 | `LLM_API_KEY` / `LLM_MODEL` | Provider key and model for the optional adapter | Only if `LLM_PROVIDER=anthropic` | `<your-api-key>` / see `.env.example` |
 
@@ -434,7 +440,7 @@ http://127.0.0.1:8000/api/docs after starting the API. This table is representat
 │   │   ├── services/       # generation, validation, calibration, exposure, assembly, leakage, reporting, audit
 │   │   ├── demo/seed.py    # deterministic synthetic seed (seed 107)
 │   │   └── main.py
-│   ├── alembic/versions/   # migrations 0001–0007
+│   ├── alembic/versions/   # migrations 0001–0008
 │   └── tests/              # pytest suite (10 modules)
 ├── frontend/
 │   ├── src/                # pages, components, lib (api client, auth)

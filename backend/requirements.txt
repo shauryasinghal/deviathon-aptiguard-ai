@@ -6,6 +6,7 @@ SQLAlchemy==2.0.36
 alembic==1.14.0
 python-multipart==0.0.32
 PyJWT==2.15.1
+cryptography==46.0.7  # RS256 verification of Google ID tokens (PyJWT needs it)
 bcrypt==4.2.1
 pandas==2.2.3
 numpy==2.1.3

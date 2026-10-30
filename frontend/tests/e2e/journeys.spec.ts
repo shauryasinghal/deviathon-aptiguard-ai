@@ -42,7 +42,7 @@ test.describe.serial("AptiGuard core journeys", () => {
 
     // wrong password is rejected with the generic message
     await page.getByLabel("Work email").fill("analyst@aptiguard.demo");
-    await page.getByLabel("Password").fill("not-the-password");
+    await page.getByLabel("Password", { exact: true }).fill("not-the-password");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByText("Invalid email or password")).toBeVisible();
   });
@@ -97,7 +97,7 @@ test.describe.serial("AptiGuard core journeys", () => {
     await page.getByRole("button", { name: /^Sign in as Candidate / }).isVisible();
     await page.getByLabel("Work email").fill("candidate3@aptiguard.demo");
     const demo = await (await request.get(`${API}/demo-status`)).json();
-    await page.getByLabel("Password").fill(demo.demo_password);
+    await page.getByLabel("Password", { exact: true }).fill(demo.demo_password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL("**/assessment");
     const row = page.locator("li", { hasText: "E2E Drive · Slot 1" });
@@ -198,5 +198,66 @@ test.describe.serial("integrity journeys", () => {
     await expect(page.getByText(/Independent review required/)).toBeVisible();
     const after = await (await request.get(`${API}/questions/${created.id}`, { headers: { Authorization: `Bearer ${await apiToken(request, "reviewer@aptiguard.demo")}` } })).json();
     expect(after.status).toBe("pending_review");
+  });
+});
+
+test.describe("authentication methods", () => {
+  test("9 · the login page offers password, Google, sign-up, forgot-password and demo login together", async ({ page }) => {
+    await page.goto("/login");
+    await expect(page.getByLabel("Work email")).toBeVisible();
+    await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Forgot password?" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign up" })).toBeVisible();
+    const google = page.getByRole("button", { name: /Continue with Google/ });
+    await expect(google).toBeVisible();
+    await expect(google).toBeDisabled(); // the hermetic test backend has no Google credentials
+    await expect(page.getByText(/not configured on this server/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Sign in as Administrator / })).toBeVisible(); // demo login
+    const pw = page.getByLabel("Password", { exact: true });
+    await page.getByRole("button", { name: "Show password" }).click();
+    await expect(pw).toHaveAttribute("type", "text");
+  });
+
+  test("10 · register with email and password, sign out, sign back in; staff areas stay closed; demo login still works", async ({ page }) => {
+    const email = `e2e.${Date.now()}@example.com`, pw = "E2e-Passw0rd-Strong!";
+    await page.goto("/login");
+    await page.getByRole("link", { name: "Sign up" }).click();
+    await page.waitForURL("**/register");
+    await page.getByLabel("Full name").fill("E2E Candidate");
+    await page.getByLabel("Email", { exact: true }).fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(pw);
+    await page.getByLabel("Confirm password").fill("a-different-password-1");
+    await page.getByRole("button", { name: /Create account/ }).click();
+    await expect(page.getByText("Passwords do not match")).toBeVisible();
+    await page.getByLabel("Confirm password").fill(pw);
+    await page.getByRole("button", { name: /Create account/ }).click();
+    await page.waitForURL("**/assessment");
+    await expect(page.getByRole("heading", { name: "Your assessments" })).toBeVisible();
+    await page.goto("/dashboard");
+    await expect(page.getByText("You don't have access to this area")).toBeVisible(); // candidates never reach staff pages
+    await page.goto("/assessment");
+    await signOut(page);
+    await page.getByLabel("Work email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(pw);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.waitForURL("**/assessment");
+    await signOut(page);
+    await page.getByLabel("Work email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill("wrong-password-123456");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page.getByText("Invalid email or password")).toBeVisible();
+    await signIn(page, "analyst"); // demo login is unaffected
+    await expect(page).toHaveURL(/dashboard/);
+  });
+
+  test("11 · forgot-password gives the same answer for any address", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByRole("link", { name: "Forgot password?" }).click();
+    await page.waitForURL("**/forgot-password");
+    // exact: a substring match would also hit the login page's "Work email" while the next route is still loading
+    await page.getByLabel("Email", { exact: true }).fill("nobody.here@example.com");
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    await expect(page.getByText(/If an account exists for that email/)).toBeVisible();
   });
 });

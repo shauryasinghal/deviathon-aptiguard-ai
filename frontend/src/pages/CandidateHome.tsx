@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Clock } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Logo } from "@/components/layout/Logo";
+import { LinkGoogle } from "@/components/auth/LinkGoogle";
 import { ThemeToggle, UserMenu } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingRows } from "@/components/ui/page";
@@ -31,6 +32,7 @@ export default function CandidateHome() {
               </li>))}</ul>
           )}
         </Card>
+        <div className="mt-6"><LinkGoogle /></div>
       </main>
     </div>
   );

@@ -11,12 +11,18 @@ export type Me = {
   permissions: string[];
   organization: { id: number; name: string };
   candidate_code: string | null;
+  auth_methods?: { google: boolean };
 };
+
+export type Session = { access_token: string; user: Me };
 
 type AuthCtx = {
   user: Me | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<Me>;
+  register: (name: string, email: string, password: string) => Promise<Me>;
+  applySession: (s: Session) => Me; // used after the one-time Google ticket has been exchanged
+  refresh: () => Promise<void>;
   logout: () => void; // local only (used on 401)
   signOut: () => Promise<void>; // revokes all server-side sessions, then clears locally
   can: (perm: string) => boolean;
@@ -47,11 +53,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, [logout]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const r = await api<{ access_token: string; user: Me }>("/auth/login", { body: { email, password } });
+  const applySession = useCallback((r: Session) => {
     tokenStore.set(r.access_token);
     setUser(r.user);
     return r.user;
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    return applySession(await api<Session>("/auth/login", { body: { email, password } }));
+  }, [applySession]);
+
+  const register = useCallback(async (name: string, email: string, password: string) => {
+    return applySession(await api<Session>("/auth/register", { body: { name, email, password } }));
+  }, [applySession]);
+
+  const refresh = useCallback(async () => {
+    try {
+      setUser(await api<Me>("/auth/me"));
+    } catch {
+      /* a 401 is handled by the global unauthorized handler */
+    }
   }, []);
 
   const signOut = useCallback(async () => {
@@ -64,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logout]);
 
   const value = useMemo<AuthCtx>(
-    () => ({ user, loading, login, logout, signOut, can: (p) => !!user?.permissions.includes(p) }),
-    [user, loading, login, logout, signOut],
+    () => ({ user, loading, login, register, applySession, refresh, logout, signOut, can: (p) => !!user?.permissions.includes(p) }),
+    [user, loading, login, register, applySession, refresh, logout, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

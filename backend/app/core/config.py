@@ -38,11 +38,31 @@ class Settings(BaseSettings):
     # scripts/finalize_expired.py command and the lazy checks still work). Safe with several workers.
     expiry_sweep_seconds: int = Field(default=60, ge=0, le=3600)
 
+    # Public self-registration and Google sign-in. Self-registered users are ALWAYS candidates, and join only the
+    # organisation named here (never one supplied by the client). Empty = self-registration disabled.
+    registration_org_slug: str = ""
+    frontend_url: str = "http://localhost:5173"  # where the OAuth callback sends the browser (fixed routes only)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"  # must match the Google console exactly
+    # Password-reset delivery. No e-mail infrastructure exists: "none" sends nothing (the endpoint still answers
+    # generically); "log" writes the reset link to the server log and is for local development only.
+    password_reset_delivery: str = "none"  # none | log
+    password_reset_ttl_minutes: int = Field(default=30, ge=5, le=120)
+
     # Optional LLM integration. Empty key => deterministic template fallback.
     llm_provider: str = "none"  # none | anthropic
     llm_api_key: str = ""
     llm_model: str = "claude-opus-5-5"
     llm_timeout_seconds: int = 60
+
+    @field_validator("password_reset_delivery", mode="before")
+    @classmethod
+    def _known_delivery(cls, v):
+        v = str(v).strip().lower()
+        if v not in ("none", "log"):
+            raise ValueError("PASSWORD_RESET_DELIVERY must be one of: none, log")
+        return v
 
     @field_validator("app_env", mode="before")
     @classmethod
@@ -64,6 +84,10 @@ class Settings(BaseSettings):
                 problems.append("JWT_SECRET must be set to a random value of at least 32 characters")
             if "*" in self.cors_origins:
                 problems.append("CORS_ORIGINS must list explicit origins")
+            if self.password_reset_delivery == "log":
+                problems.append("PASSWORD_RESET_DELIVERY=log is development-only")
+            if self.google_client_id and not (self.google_redirect_uri.startswith("https://") and self.frontend_url.startswith("https://")):
+                problems.append("GOOGLE_REDIRECT_URI and FRONTEND_URL must be https when Google sign-in is enabled")
             if problems:
                 raise ValueError("Unsafe production configuration: " + "; ".join(problems))
         return self
@@ -75,6 +99,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def google_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret and self.google_redirect_uri)
 
     @property
     def llm_configured(self) -> bool:

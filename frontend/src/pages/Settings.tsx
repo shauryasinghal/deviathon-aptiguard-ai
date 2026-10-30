@@ -8,6 +8,7 @@ import { Dialog, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/u
 import { ErrorState, FilterBar, KeyValue, LoadingRows, PageHeader, Pagination } from "@/components/ui/page";
 import { Card, CardBody, CardHeader, Input, Label } from "@/components/ui/primitives";
 import { Table, Td, Th, THead, Tr } from "@/components/ui/table";
+import { LinkGoogle } from "@/components/auth/LinkGoogle";
 import { api, ApiError, qs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, titleCase } from "@/lib/utils";
@@ -35,6 +36,7 @@ export default function Settings() {
               ["Model", s.data.model_provider.model], ["API key", s.data.model_provider.api_key], ["Fallback", s.data.model_provider.fallback]]} /></CardBody></Card>
             <Card><CardHeader title="Security (prototype)" /><CardBody><KeyValue cols={1} items={[["Auth", s.data.security.auth], ["Insecure dev secret in use", s.data.security.insecure_dev_secret ? "yes — set JWT_SECRET" : "no"],
               ["CORS origins", s.data.security.cors_origins.join(", ")], ["Upload limit", `${s.data.security.max_upload_mb} MB`], ["Database", s.data.database]]} /></CardBody></Card>
+            <LinkGoogle />
             {can("demo.reset") && <DemoReset />}
           </div>}
         </TabsContent>

@@ -107,5 +107,36 @@ class AuthFailure(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
-__all__ = ["Organization", "Permission", "Role", "User", "Candidate", "Policy", "AuditEvent", "AuthFailure", "role_permissions"]
+class ExternalIdentity(Base):
+    """A third-party (Google) identity linked to exactly one local user. `subject` is the provider's stable id
+    (Google `sub`); the e-mail address is informational only and is never used to find or merge accounts."""
+
+    __tablename__ = "external_identities"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_external_identities_provider_subject"),
+                      UniqueConstraint("user_id", "provider", name="uq_external_identities_user_provider"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(20))
+    subject: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(160))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AuthToken(Base):
+    """Single-use, short-lived secrets: OAuth state, post-OAuth login tickets and password-reset tokens. Only the
+    SHA-256 of the secret is stored; a token is consumed by an atomic UPDATE of `used_at`."""
+
+    __tablename__ = "auth_tokens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)  # oauth_state | login_ticket | password_reset
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+__all__ = ["Organization", "Permission", "Role", "User", "Candidate", "Policy", "AuditEvent", "AuthFailure", "ExternalIdentity",
+           "AuthToken", "role_permissions"]
 _ = Integer  # keep import for alembic autogenerate type map

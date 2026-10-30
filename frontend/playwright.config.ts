@@ -17,7 +17,7 @@ export default defineConfig({
   use: { baseURL: `http://localhost:${WEB_PORT}`, trace: "retain-on-failure", viewport: { width: 1440, height: 900 } },
   webServer: [
     {
-      command: `rm -f ${E2E_DB} ${E2E_DB}-wal ${E2E_DB}-shm && DATABASE_URL=sqlite:///${E2E_DB} CORS_ORIGINS=http://localhost:${WEB_PORT} ../backend/.venv/bin/python ../scripts/seed_demo.py && DATABASE_URL=sqlite:///${E2E_DB} CORS_ORIGINS=http://localhost:${WEB_PORT} ../backend/.venv/bin/uvicorn app.main:app --app-dir ../backend --port ${API_PORT}`,
+      command: `rm -f ${E2E_DB} ${E2E_DB}-wal ${E2E_DB}-shm && DATABASE_URL=sqlite:///${E2E_DB} CORS_ORIGINS=http://localhost:${WEB_PORT} ../backend/.venv/bin/python ../scripts/seed_demo.py && DATABASE_URL=sqlite:///${E2E_DB} CORS_ORIGINS=http://localhost:${WEB_PORT} REGISTRATION_ORG_SLUG=integraminds-demo ../backend/.venv/bin/uvicorn app.main:app --app-dir ../backend --port ${API_PORT}`,
       url: `http://127.0.0.1:${API_PORT}/api/v1/health`,
       timeout: 180_000,
       reuseExistingServer: false,

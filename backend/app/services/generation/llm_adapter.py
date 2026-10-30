@@ -82,6 +82,8 @@ def generate_llm_variants(source: dict, n: int, difficulty: str) -> list[Generat
         raise LLMUnavailable(f"LLM provider unreachable: {e.__class__.__name__}") from e
     except anthropic.APIStatusError as e:
         raise LLMUnavailable(f"LLM provider error HTTP {e.status_code}") from e
+    except (anthropic.APIError, ValueError) as e:  # ValueError covers pydantic ValidationError and bad JSON
+        raise LLMUnavailable(f"LLM returned malformed output ({e.__class__.__name__})") from e  # class name only: no provider text
     if resp.stop_reason == "refusal" or resp.parsed_output is None:
         raise LLMUnavailable(f"LLM returned no usable output (stop_reason={resp.stop_reason})")
 
